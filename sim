@@ -1,0 +1,30 @@
+#!/bin/bash
+# One-command launcher for SO-101 MuJoCo Simulation with Latest Trained AI Model
+
+PYTHON_BIN="/Users/nam/miniforge3/envs/lerobot/bin/mjpython"
+FALLBACK_BIN="/Users/nam/miniforge3/envs/lerobot/bin/python"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+RUN_BIN="$FALLBACK_BIN"
+if [ -f "$PYTHON_BIN" ]; then
+    RUN_BIN="$PYTHON_BIN"
+fi
+
+MODE="${1:-act}"
+
+if [ "$MODE" == "rl" ]; then
+    echo "🤖 Running Latest Trained Reinforcement Learning (PPO) Model..."
+    exec "$RUN_BIN" "${SCRIPT_DIR}/eval_rl.py" "${@:2}"
+elif [ "$MODE" == "vision" ]; then
+    echo "📷 Running Live Vision AI Camera Tracker (Webcam)..."
+    exec "$FALLBACK_BIN" "${SCRIPT_DIR}/vision_detector.py" "${@:2}"
+elif [ "$MODE" == "vision-ai" ]; then
+    echo "🧠 Running Vision Neural Network Evaluator in MuJoCo..."
+    exec "$FALLBACK_BIN" "${SCRIPT_DIR}/eval_vision_ai.py" "${@:2}"
+elif [ "$MODE" == "ik" ]; then
+    echo "🤖 Running Automated Pick-and-Place State Machine..."
+    exec "$RUN_BIN" "${SCRIPT_DIR}/sim_so101_pick.py"
+else
+    echo "🤖 Running Latest 50,000-Step ACT Neural Network Model (best_model.pt)..."
+    exec "$RUN_BIN" "${SCRIPT_DIR}/sim_so101_act.py"
+fi

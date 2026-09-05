@@ -1,0 +1,130 @@
+<mujoco model="so101_act_scene">
+  <compiler angle="radian"/>
+
+  <option timestep="0.002" gravity="0 0 -9.81" impratio="10" cone="elliptic"/>
+
+  <default>
+    <geom contype="0" conaffinity="0"/>
+    <joint damping="0.3" armature="0.01"/>
+    <position kp="350" kv="25" forcelimited="true" forcerange="-25 25"/>
+  </default>
+
+  <asset>
+    <mesh name="base_motor_holder_so101_v1" content_type="model/stl" file="assets/base_motor_holder_so101_v1.stl"/>
+    <mesh name="base_so101_v2" content_type="model/stl" file="assets/base_so101_v2.stl"/>
+    <mesh name="sts3215_03a_v1" content_type="model/stl" file="assets/sts3215_03a_v1.stl"/>
+    <mesh name="waveshare_mounting_plate_so101_v2" content_type="model/stl" file="assets/waveshare_mounting_plate_so101_v2.stl"/>
+    <mesh name="motor_holder_so101_base_v1" content_type="model/stl" file="assets/motor_holder_so101_base_v1.stl"/>
+    <mesh name="rotation_pitch_so101_v1" content_type="model/stl" file="assets/rotation_pitch_so101_v1.stl"/>
+    <mesh name="upper_arm_so101_v1" content_type="model/stl" file="assets/upper_arm_so101_v1.stl"/>
+    <mesh name="under_arm_so101_v1" content_type="model/stl" file="assets/under_arm_so101_v1.stl"/>
+    <mesh name="motor_holder_so101_wrist_v1" content_type="model/stl" file="assets/motor_holder_so101_wrist_v1.stl"/>
+    <mesh name="sts3215_03a_no_horn_v1" content_type="model/stl" file="assets/sts3215_03a_no_horn_v1.stl"/>
+    <mesh name="wrist_roll_pitch_so101_v2" content_type="model/stl" file="assets/wrist_roll_pitch_so101_v2.stl"/>
+    <mesh name="wrist_roll_follower_so101_v1" content_type="model/stl" file="assets/wrist_roll_follower_so101_v1.stl"/>
+    <mesh name="moving_jaw_so101_v1" content_type="model/stl" file="assets/moving_jaw_so101_v1.stl"/>
+  </asset>
+
+  <worldbody>
+    <!-- Lighting & Overhead Camera -->
+    <light directional="true" pos="0 0 1.5" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
+    <camera name="logi_cam" pos="0.28 0.0 0.45" euler="0 40 90" fovy="60"/>
+
+    <!-- 100% Solid Table Surface (Ultra-Rigid Thick Box - Zero Floor Penetration) -->
+    <geom name="table_solid" type="box" size="2.0 2.0 0.05" pos="0 0 -0.05" rgba="0.14 0.16 0.20 1" contype="1" conaffinity="1" friction="1.5 0.01 0.001" solref="0.001 1.0" solimp="0.99 0.999 0.0001 0.5 2"/>
+
+    <!-- Robot Base Geoms with 100% Physical Collision Hull -->
+    <geom pos="-0.00636471 -9.94414e-05 -0.0024" quat="0.499998 0.5 0.500002 0.5" type="mesh" rgba="1 0.82 0.12 1" mesh="base_motor_holder_so101_v1" contype="1" conaffinity="1"/>
+    <geom pos="-0.00636471 -8.97657e-09 -0.0024" quat="0.499998 0.5 0.500002 0.5" type="mesh" rgba="1 0.82 0.12 1" mesh="base_so101_v2" contype="1" conaffinity="1"/>
+    <geom pos="0.0263353 -8.97657e-09 0.0437" quat="1 0 0 0" type="mesh" rgba="0.1 0.1 0.1 1" mesh="sts3215_03a_v1" contype="1" conaffinity="1"/>
+    <geom pos="-0.0309827 -0.000199441 0.0474" quat="0.499998 0.5 0.500002 0.5" type="mesh" rgba="1 0.82 0.12 1" mesh="waveshare_mounting_plate_so101_v2" contype="1" conaffinity="1"/>
+    <geom name="base_plate_col" type="box" size="0.06 0.06 0.02" pos="0 0 0.02" contype="1" conaffinity="1" friction="1.5 0.01 0.001" rgba="0 0 0 0"/>
+    <geom name="base_turret_col" type="cylinder" size="0.04 0.035" pos="0.02 0 0.045" contype="1" conaffinity="1" friction="1.5 0.01 0.001" rgba="0 0 0 0"/>
+
+    <!-- Shoulder Pan -->
+    <body name="shoulder_link" pos="0.0388353 -8.97657e-09 0.0624" quat="1.76036e-12 1.32679e-06 -1 -1.32679e-06">
+      <inertial pos="-0.0307604 -1.66727e-05 -0.0252713" quat="0.999865 0.00149563 0.0097084 0.0132043" mass="0.100006" diaginertia="8.37836e-05 8.10388e-05 2.39552e-05"/>
+      <joint name="shoulder_pan" range="-1.91986 1.91986"/>
+      <geom pos="-0.0303992 0.000422241 -0.0417" quat="0.499998 0.5 0.5 -0.500002" type="mesh" rgba="0.1 0.1 0.1 1" mesh="sts3215_03a_v1"/>
+      <geom pos="-0.0675992 -0.000177759 0.0158499" quat="0.499998 0.5 -0.5 0.500002" type="mesh" rgba="1 0.82 0.12 1" mesh="motor_holder_so101_base_v1"/>
+      <geom pos="0.0122008 2.22413e-05 0.0464" quat="0.707105 -0.707108 0 0" type="mesh" rgba="1 0.82 0.12 1" mesh="rotation_pitch_so101_v1"/>
+
+      <!-- Shoulder Lift -->
+      <body name="upper_arm_link" pos="-0.0303992 -0.0182778 -0.0542" quat="0.499998 -0.5 -0.5 -0.500002">
+        <inertial pos="-0.0898471 -0.00838224 0.0184089" quat="0.453195 0.454063 0.541891 0.542951" mass="0.103" diaginertia="0.000150873 0.000142487 3.72451e-05"/>
+        <!-- Shoulder Lift (Limited to physical home pose and table stops) -->
+        <joint name="shoulder_lift" range="-1.91986 0.663225"/>
+        <geom pos="-0.11257 -0.0155 0.0187" quat="9.38184e-07 -0.707105 0.707108 -9.38187e-07" type="mesh" rgba="0.1 0.1 0.1 1" mesh="sts3215_03a_v1"/>
+        <geom pos="-0.065085 0.012 0.0182" quat="1.32679e-06 1 0 0" type="mesh" rgba="1 0.82 0.12 1" mesh="upper_arm_so101_v1"/>
+        <geom name="upper_arm_col" type="capsule" size="0.018 0.04" pos="-0.065 0 0.018" contype="1" conaffinity="1" friction="1.5 0.01 0.001" rgba="0 0 0 0"/>
+
+        <!-- Elbow Flex (Limited to prevent pushing below table) -->
+        <body name="lower_arm_link" pos="-0.11257 -0.028 0" quat="0.707105 0 0 0.707108">
+          <inertial pos="-0.0980701 0.00324376 0.0182831" quat="0.510729 0.517006 0.487966 0.483477" mass="0.104" diaginertia="0.000160262 0.000145304 2.83125e-05"/>
+          <joint name="elbow_flex" range="-0.383972 1.69"/>
+          <geom pos="-0.0648499 -0.032 0.0182" quat="1.32679e-06 1 0 0" type="mesh" rgba="1 0.82 0.12 1" mesh="under_arm_so101_v1"/>
+          <geom pos="-0.0648499 -0.032 0.018" quat="1.32679e-06 -1 0 0" type="mesh" rgba="1 0.82 0.12 1" mesh="motor_holder_so101_wrist_v1"/>
+          <geom pos="-0.1224 0.0052 0.0187" quat="1.76038e-12 -1.32679e-06 1 -1.32679e-06" type="mesh" rgba="0.1 0.1 0.1 1" mesh="sts3215_03a_v1"/>
+          <geom name="lower_arm_col" type="capsule" size="0.018 0.05" pos="-0.065 -0.015 0.018" contype="1" conaffinity="1" friction="1.5 0.01 0.001" rgba="0 0 0 0"/>
+
+          <!-- Wrist Flex -->
+          <body name="wrist_link" pos="-0.1349 0.0052 0" quat="0.707105 0 0 -0.707108">
+            <inertial pos="-0.000103312 -0.0386143 0.0281156" quat="0.967143 0.254226 0.00162226 -0.000146307" mass="0.079" diaginertia="3.68265e-05 2.74474e-05 1.89434e-05"/>
+            <joint name="wrist_flex" range="-1.65806 1.65806"/>
+            <geom pos="0 -0.0424 0.0306" quat="0.499998 0.5 0.5 -0.500002" type="mesh" rgba="0.1 0.1 0.1 1" mesh="sts3215_03a_no_horn_v1"/>
+            <geom pos="0 -0.028 0.0181" quat="0.499998 -0.5 -0.5 -0.500002" type="mesh" rgba="1 0.82 0.12 1" mesh="wrist_roll_pitch_so101_v2"/>
+            <geom name="wrist_col" type="capsule" size="0.018 0.025" pos="0 -0.03 0.025" contype="1" conaffinity="1" friction="1.5 0.01 0.001" rgba="0 0 0 0"/>
+
+            <!-- Wrist Roll -->
+            <body name="gripper_link" pos="0 -0.0611 0.0181" quat="0.0172101 -0.0172081 0.706899 0.706896">
+              <inertial pos="0.000213627 0.000245138 -0.025187" quat="0.600717 0.355993 0.35863 0.61951" mass="0.087" diaginertia="4.33735e-05 3.77229e-05 2.42839e-05"/>
+              <joint name="wrist_roll" range="-2.74385 2.84121"/>
+              <geom pos="0.0077 0.0001 -0.0234" quat="0.707105 -0.707108 0 0" type="mesh" rgba="0.1 0.1 0.1 1" mesh="sts3215_03a_v1"/>
+              <!-- Fixed Gripper Jaw (Mesh + Physical Contact Capsule) -->
+              <geom pos="0 -0.000218214 0.000949706" quat="1.32679e-06 -1 0 0" type="mesh" rgba="1 0.82 0.12 1" mesh="wrist_roll_follower_so101_v1" contype="1" conaffinity="1" friction="2.5 0.05 0.001" solref="0.002 1.0" solimp="0.98 0.999 0.0005 0.5 2"/>
+              <geom name="fixed_jaw_collider" type="capsule" size="0.01 0.025" pos="0 0.015 -0.02" contype="1" conaffinity="1" friction="2.5 0.05 0.001" solref="0.002 1.0" solimp="0.98 0.999 0.0005 0.5 2" rgba="1 0.82 0.12 0"/>
+              <geom name="gripper_base_col" type="box" size="0.02 0.02 0.025" pos="0 0 -0.01" contype="1" conaffinity="1" friction="1.5 0.01 0.001" rgba="0 0 0 0"/>
+
+              <!-- Moving Gripper Jaw (Mesh + Physical Contact Capsule) -->
+              <body name="moving_jaw_so101_v1_link" pos="0.0202 0.0188 -0.0234" quat="0.707105 0.707108 -1.85362e-08 1.85363e-08">
+                <inertial pos="-0.00157495 -0.0300244 0.0192755" quat="0.695265 0.717965 -0.0245618 -0.0230097" mass="0.012" diaginertia="6.63582e-06 5.29092e-06 1.86523e-06"/>
+                <joint name="gripper" range="-0.174533 1.74533"/>
+                <geom pos="0 0 0.0189" quat="1 0 0 0" type="mesh" rgba="1 0.82 0.12 1" mesh="moving_jaw_so101_v1" contype="1" conaffinity="1" friction="2.5 0.05 0.001" solref="0.002 1.0" solimp="0.98 0.999 0.0005 0.5 2"/>
+                <geom name="moving_jaw_collider" type="capsule" size="0.01 0.025" pos="0 -0.015 0.02" contype="1" conaffinity="1" friction="2.5 0.05 0.001" solref="0.002 1.0" solimp="0.98 0.999 0.0005 0.5 2" rgba="1 0.82 0.12 0"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <!-- Exact Real Foam Ball (Radius 24mm / Diameter 48mm, Height Z=0.024m) -->
+    <body name="ball" pos="0.20 0.0 0.024">
+      <joint name="ball_joint" type="free" damping="0.05"/>
+      <geom name="ball_geom" type="sphere" size="0.024" mass="0.015"
+            rgba="0.95 0.42 0.08 1.0"
+            friction="3.5 0.5 0.2"
+            solref="0.002 1.0"
+            solimp="0.98 0.999 0.0005 0.5 2"
+            contype="1" conaffinity="1"/>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude body1="shoulder_link" body2="upper_arm_link"/>
+    <exclude body1="upper_arm_link" body2="lower_arm_link"/>
+    <exclude body1="lower_arm_link" body2="wrist_link"/>
+    <exclude body1="wrist_link" body2="gripper_link"/>
+    <exclude body1="gripper_link" body2="moving_jaw_so101_v1_link"/>
+  </contact>
+
+  <!-- 6 Feetech STS3215 Smart Position Servos -->
+  <actuator>
+    <position name="act_shoulder_pan"  joint="shoulder_pan"  kp="120" kv="12"/>
+    <position name="act_shoulder_lift" joint="shoulder_lift" kp="220" kv="20"/>
+    <position name="act_elbow_flex"    joint="elbow_flex"    kp="180" kv="18"/>
+    <position name="act_wrist_flex"    joint="wrist_flex"    kp="100" kv="10"/>
+    <position name="act_wrist_roll"    joint="wrist_roll"    kp="100" kv="10"/>
+    <position name="act_gripper"       joint="gripper"       kp="120" kv="12"/>
+  </actuator>
+</mujoco>

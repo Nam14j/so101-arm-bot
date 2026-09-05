@@ -1,0 +1,23 @@
+#!/bin/bash
+# One-command launcher for SO-101 RL Training (Live 3D Visual or High-Speed Turbo)
+
+PYTHON_BIN="/Users/nam/miniforge3/envs/lerobot/bin/mjpython"
+FALLBACK_BIN="/Users/nam/miniforge3/envs/lerobot/bin/python"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+RUN_BIN="$FALLBACK_BIN"
+if [ -f "$PYTHON_BIN" ]; then
+    RUN_BIN="$PYTHON_BIN"
+fi
+
+MODE="${1}"
+
+if [ "$MODE" == "live" ] || [ "$MODE" == "3d" ] || [ "$MODE" == "view" ]; then
+    echo "👁️ Starting LIVE Visual Reinforcement Learning Training (3D Window)..."
+    echo "☕ Caffeinate active: Mac will not sleep during training."
+    exec caffeinate -dis "$RUN_BIN" "${SCRIPT_DIR}/train_rl_live.py" "${@:2}"
+else
+    echo "🚀 Starting High-Speed Turbo PPO Training (8 Parallel Workers)..."
+    echo "☕ Caffeinate active: Mac will not sleep during training."
+    exec caffeinate -dis "$FALLBACK_BIN" "${SCRIPT_DIR}/train_rl_ppo.py" --num_envs 8 "$@"
+fi

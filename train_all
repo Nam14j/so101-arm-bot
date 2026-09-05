@@ -1,0 +1,39 @@
+#!/bin/bash
+# ==============================================================================
+# 🚀 SO-101 Master Training Launcher: Dual Brain Training (Arm RL + Vision AI)
+# ==============================================================================
+# Opens two dedicated, separate macOS Terminal windows side-by-side:
+#   • Window 1: 🦾 Robot Arm Pick-and-Lift Policy (Reinforcement Learning - PPO)
+#   • Window 2: 🧠 Vision Neural Network (Ground-Truth Supervised 3D Pose Estimator)
+# ==============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_BIN="/Users/nam/miniforge3/envs/lerobot/bin/python"
+
+RL_STEPS="${1:-3000000}"
+VISION_STEPS="${2:-5000}"
+
+echo "========================================================================"
+echo "🚀 LAUNCHING DUAL-BRAIN TRAINING (ARM MOTORS + VISION AI)"
+echo "   • Window 1 (Arm RL Model)   : $RL_STEPS Steps (PPO MuJoCo Policy)"
+echo "   • Window 2 (Vision AI Model): $VISION_STEPS Steps (CNN Coordinate Regressor)"
+echo "========================================================================"
+
+# Command for Window 1 (Arm RL)
+CMD_RL="echo -e '\033[1;33m[WINDOW 1: ROBOT ARM RL TRAINING]\033[0m'; cd '$SCRIPT_DIR' && caffeinate -dis '$PYTHON_BIN' '$SCRIPT_DIR/train_rl_ppo.py' --num_envs 8 --timesteps $RL_STEPS"
+
+# Command for Window 2 (Vision AI)
+CMD_VISION="echo -e '\033[1;36m[WINDOW 2: VISION NEURAL NETWORK TRAINING]\033[0m'; cd '$SCRIPT_DIR' && caffeinate -dis '$PYTHON_BIN' '$SCRIPT_DIR/train_vision_ai.py' --steps $VISION_STEPS"
+
+# Launch Window 1 via AppleScript
+osascript -e "tell application \"Terminal\" to do script \"$CMD_RL\"" > /dev/null 2>&1
+
+# Brief pause to stagger window placement
+sleep 1
+
+# Launch Window 2 via AppleScript
+osascript -e "tell application \"Terminal\" to do script \"$CMD_VISION\"" > /dev/null 2>&1
+
+echo -e "\n✅ \033[1;32mSUCCESS: Both training sessions launched in separate Terminal windows!\033[0m"
+echo "   👉 Check your new Terminal windows to watch the live progress of both brains side-by-side!"
+echo "========================================================================"

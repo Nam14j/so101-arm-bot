@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Logitech C920 Stand — 3D Viewer</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#07070f;overflow:hidden;font-family:'Inter',sans-serif}
+canvas{display:block;width:100vw;height:100vh}
+
+#hud{position:absolute;top:20px;left:20px;pointer-events:none}
+#hud h1{font-size:.95rem;font-weight:700;color:#fff;margin-bottom:2px}
+#hud p{font-size:.66rem;color:#444}
+
+#btn-reset{position:absolute;top:20px;left:50%;transform:translateX(-50%);background:rgba(0,229,255,.1);border:1px solid rgba(0,229,255,.25);color:#00e5ff;font-size:.7rem;font-family:'Inter',sans-serif;padding:6px 18px;border-radius:20px;cursor:pointer}
+
+/* Right panel — tabbed */
+#panel{position:absolute;top:20px;right:20px;background:rgba(10,10,20,.94);border:1px solid rgba(255,255,255,.08);border-radius:14px;overflow:hidden;width:240px}
+#tabs{display:flex;border-bottom:1px solid rgba(255,255,255,.06)}
+.tab-btn{flex:1;padding:9px 4px;font-size:.62rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#444;cursor:pointer;border:none;background:none;transition:color .2s}
+.tab-btn.active{color:#00e5ff;border-bottom:2px solid #00e5ff}
+.tab-pane{display:none;padding:13px 16px}
+.tab-pane.active{display:block}
+.sr{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.sr:last-child{border-bottom:none}
+.sl{font-size:.63rem;color:#555}.sv{font-size:.63rem;color:#ccc;font-family:monospace;font-weight:500}
+.bambu-badge{background:rgba(0,200,100,.08);border:1px solid rgba(0,200,100,.2);border-radius:6px;padding:5px 8px;margin-bottom:10px;font-size:.62rem;color:#00c864;font-weight:600}
+.warn{background:rgba(255,180,0,.07);border:1px solid rgba(255,180,0,.18);border-radius:6px;padding:5px 8px;margin-bottom:8px;font-size:.6rem;color:#ffb400;line-height:1.5}
+.ph2{font-size:.63rem;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.07em;margin:10px 0 5px}
+
+/* Connection guide */
+#conn{position:absolute;bottom:20px;left:20px;width:315px;background:rgba(10,10,20,.93);border:1px solid rgba(255,200,0,.12);border-radius:12px;padding:14px 16px}
+#conn h2{font-size:.66rem;font-weight:600;color:#ffd700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px}
+.ci{display:flex;gap:9px;margin-bottom:9px}.ci:last-child{margin-bottom:0}
+.cn{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.57rem;font-weight:700;flex-shrink:0;margin-top:1px}
+.ct{font-size:.65rem;font-weight:600;color:#ddd;margin-bottom:2px}
+.cd{font-size:.58rem;color:#555;line-height:1.55}
+
+#legend{position:absolute;bottom:20px;right:20px;display:flex;flex-direction:column;gap:5px}
+.li{display:flex;align-items:center;gap:7px;font-size:.61rem;color:#444}
+.ld{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+#hint{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);font-size:.61rem;color:#2a2a2a;padding:5px 13px;border-radius:20px;border:1px solid #111;white-space:nowrap}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <h1>&#128249; Logitech C920 &mdash; Bird&rsquo;s-Eye Stand</h1>
+  <p>Drag to rotate &middot; Scroll to zoom &middot; Right-drag to pan</p>
+</div>
+
+<button id="btn-reset" onclick="resetView()">&#x21BB; Reset View</button>
+
+<!-- Tabbed right panel -->
+<div id="panel">
+  <div id="tabs">
+    <button class="tab-btn active" onclick="showTab('dims')">Dims</button>
+    <button class="tab-btn" onclick="showTab('print')">Print</button>
+    <button class="tab-btn" onclick="showTab('parts')">Parts</button>
+  </div>
+
+  <div id="tab-dims" class="tab-pane active">
+    <div class="sr"><span class="sl">Base plate</span><span class="sv">200&times;200&times;8mm</span></div>
+    <div class="sr"><span class="sl">Column (2 halves)</span><span class="sv">35&times;35&times;275mm each</span></div>
+    <div class="sr"><span class="sl">Total column</span><span class="sv">550mm (55cm)</span></div>
+    <div class="sr"><span class="sl">Arm reach</span><span class="sv">220mm</span></div>
+    <div class="sr"><span class="sl">Total height</span><span class="sv">~558mm</span></div>
+    <div class="sr"><span class="sl">FOV coverage</span><span class="sv">~420&times;280mm</span></div>
+    <div class="sr"><span class="sl">Screws</span><span class="sv">&#10060; None</span></div>
+  </div>
+
+  <div id="tab-print" class="tab-pane">
+    <div class="bambu-badge">&#x2713; Optimized for Bambu P2S</div>
+    <div class="warn">&#9888; Column (550mm) taller than build volume (256mm). Split into 2&times;275mm halves &mdash; shown in yellow on model.</div>
+    <div class="sr"><span class="sl">Slicer</span><span class="sv">Bambu Studio</span></div>
+    <div class="sr"><span class="sl">Material</span><span class="sv">PETG (preferred)</span></div>
+    <div class="sr"><span class="sl">Layer height</span><span class="sv">0.20mm</span></div>
+    <div class="sr"><span class="sl">Walls / perimeters</span><span class="sv">4</span></div>
+    <div class="sr"><span class="sl">Top / bottom layers</span><span class="sv">5</span></div>
+    <div class="sr"><span class="sl">Infill</span><span class="sv">30% Gyroid</span></div>
+    <div class="sr"><span class="sl">Supports</span><span class="sv">None needed</span></div>
+    <div class="sr"><span class="sl">Plate type</span><span class="sv">Smooth PEI</span></div>
+    <div class="sr"><span class="sl">Speed profile</span><span class="sv">Standard</span></div>
+    <div class="sr"><span class="sl">Est. filament</span><span class="sv">~180g total</span></div>
+  </div>
+
+  <div id="tab-parts" class="tab-pane">
+    <div class="ph2">Can I print 2 at once? (256mm bed)</div>
+
+    <div class="sr">
+      <span class="sl">&#9312; Base plate &times;1</span>
+      <span class="sv" style="color:#ff6b6b">&#10060; Solo only</span>
+    </div>
+    <div style="font-size:.57rem;color:#444;padding:2px 0 6px">200&times;200mm — 2 would need 400mm. Too wide.</div>
+
+    <div class="sr">
+      <span class="sl">&#9313; Column bottom &times;2</span>
+      <span class="sv" style="color:#4ade80">&#10003; Yes!</span>
+    </div>
+    <div style="font-size:.57rem;color:#444;padding:2px 0 6px">2&times;(35&times;35&times;275mm) side-by-side = 80&times;35mm footprint. Fits easily.</div>
+
+    <div class="sr">
+      <span class="sl">&#9314; Column top &times;2</span>
+      <span class="sv" style="color:#4ade80">&#10003; Yes!</span>
+    </div>
+    <div style="font-size:.57rem;color:#444;padding:2px 0 6px">Same as above — print both halves together.</div>
+
+    <div class="sr">
+      <span class="sl">&#9315; Arm + cradle &times;1</span>
+      <span class="sv" style="color:#fbbf24">&#9888; Tight</span>
+    </div>
+    <div style="font-size:.57rem;color:#444;padding:2px 0 8px">~240&times;70mm flat. A second one needs 480mm — too wide. Print solo.</div>
+
+    <div class="bambu-badge" style="margin-top:4px">
+      &#x26A1; Tip: Print both column halves together &mdash; cuts print jobs from 4 down to 3!
+    </div>
+  </div>
+</div>
+
+<!-- Connection guide -->
+<div id="conn">
+  <h2>&#x1F517; No-Screw Connections</h2>
+  <div class="ci">
+    <div class="cn" style="background:rgba(255,80,80,.2);color:#ff5050">1</div>
+    <div><div class="ct">Base &harr; Column &mdash; Dovetail Press-Fit</div>
+    <div class="cd">Tapered dovetail pin on column bottom slides into base socket. Friction holds it. Pull straight up to release.</div></div>
+  </div>
+  <div class="ci">
+    <div class="cn" style="background:rgba(255,220,0,.25);color:#ffdd00">&#9135;</div>
+    <div><div class="ct">Column Bottom &harr; Top &mdash; Interlocking Sleeve</div>
+    <div class="cd">Column halves join with a 40mm internal sleeve that press-fits into both ends. No glue needed with PETG.</div></div>
+  </div>
+  <div class="ci">
+    <div class="cn" style="background:rgba(255,180,0,.2);color:#ffb400">2</div>
+    <div><div class="ct">Column &harr; Arm &mdash; Snap-Tab T-Slot</div>
+    <div class="cd">Arm slides into T-slot on column top. Spring tab clicks into detent. Squeeze to release.</div></div>
+  </div>
+  <div class="ci">
+    <div class="cn" style="background:rgba(0,229,255,.2);color:#00e5ff">3</div>
+    <div><div class="ct">Camera &harr; Pocket &mdash; Snug Slide-In Sleeve</div>
+    <div class="cd">Fold the C920 clip completely closed and slide it vertically into the snug sleeve. The camera neck slides through the front slot. Holds gravity-locked &amp; aligned.</div></div>
+  </div>
+</div>
+
+<div id="legend">
+  <div class="li"><div class="ld" style="background:#dde2ec"></div>PLA / PETG Structure</div>
+  <div class="li"><div class="ld" style="background:#222"></div>C920 Camera</div>
+  <div class="li"><div class="ld" style="background:#ff5050"></div>&#9312; Dovetail Joint</div>
+  <div class="li"><div class="ld" style="background:#ffdd00"></div>Column Split (275mm)</div>
+  <div class="li"><div class="ld" style="background:#ffaa00"></div>&#9313; Snap-Tab Joint</div>
+  <div class="li"><div class="ld" style="background:#00ccee"></div>&#9314; Slide-In Pocket + FOV</div>
+</div>
+
+<div id="hint">Drag &middot; Scroll &middot; Right-Drag to Pan</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+function showTab(id){
+  document.querySelectorAll('.tab-btn').forEach(function(b,i){b.classList.remove('active');});
+  document.querySelectorAll('.tab-pane').forEach(function(p){p.classList.remove('active');});
+  var btns=document.querySelectorAll('.tab-btn');
+  var map={dims:0,print:1,parts:2};
+  btns[map[id]].classList.add('active');
+  document.getElementById('tab-'+id).classList.add('active');
+}
+
+(function(){
+  var renderer=new THREE.WebGLRenderer({canvas:document.getElementById('c'),antialias:true});
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.shadowMap.enabled=true;
+  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.toneMapping=THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure=1.1;
+
+  var scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x07070f);
+  scene.fog=new THREE.FogExp2(0x07070f,0.00055);
+
+  var camera=new THREE.PerspectiveCamera(42,window.innerWidth/window.innerHeight,1,6000);
+  var DP=new THREE.Vector3(480,500,640),DT=new THREE.Vector3(110,260,0);
+  camera.position.copy(DP);
+  var controls=new THREE.OrbitControls(camera,renderer.domElement);
+  controls.target.copy(DT);
+  controls.enableDamping=true; controls.dampingFactor=0.07;
+  controls.minDistance=80; controls.maxDistance=2200; controls.update();
+  window.resetView=function(){camera.position.copy(DP);controls.target.copy(DT);controls.update();};
+
+  scene.add(new THREE.AmbientLight(0xffffff,0.35));
+  var key=new THREE.DirectionalLight(0xfff8f0,1.8);
+  key.position.set(350,900,500); key.castShadow=true;
+  key.shadow.mapSize.width=key.shadow.mapSize.height=2048;
+  key.shadow.camera.near=1;key.shadow.camera.far=2200;
+  key.shadow.camera.left=-500;key.shadow.camera.right=500;
+  key.shadow.camera.top=900;key.shadow.camera.bottom=-200;
+  scene.add(key);
+  var fl=new THREE.DirectionalLight(0x6070ff,0.5); fl.position.set(-500,300,-400); scene.add(fl);
+  var ri=new THREE.DirectionalLight(0x00e5ff,0.2); ri.position.set(0,-100,600); scene.add(ri);
+
+  var pla =new THREE.MeshStandardMaterial({color:0xe2e8f4,roughness:.50,metalness:.04});
+  var plaD=new THREE.MeshStandardMaterial({color:0xb8c4d4,roughness:.55,metalness:.04});
+  var jt1 =new THREE.MeshStandardMaterial({color:0xff4040,roughness:.4,metalness:.1,transparent:true,opacity:.9});
+  var split=new THREE.MeshStandardMaterial({color:0xffdd00,roughness:.3,metalness:.1,transparent:true,opacity:.9});
+  var jt2 =new THREE.MeshStandardMaterial({color:0xffaa00,roughness:.4,metalness:.1,transparent:true,opacity:.9});
+  var jt3 =new THREE.MeshStandardMaterial({color:0x00ccee,roughness:.3,metalness:.2,transparent:true,opacity:.85});
+  var camM=new THREE.MeshStandardMaterial({color:0x1a1a1a,roughness:.38,metalness:.40});
+  var camR=new THREE.MeshStandardMaterial({color:0x111111,roughness:.55,metalness:.20});
+  var lns =new THREE.MeshStandardMaterial({color:0x0a2844,roughness:.05,metalness:.95,transparent:true,opacity:.85});
+  var lnsR=new THREE.MeshStandardMaterial({color:0x112233,roughness:.20,metalness:.80});
+  var blt =new THREE.MeshStandardMaterial({color:0x909090,roughness:.20,metalness:.95});
+  var tabM=new THREE.MeshStandardMaterial({color:0x111116,roughness:.92});
+  var fovM=new THREE.MeshBasicMaterial({color:0x00e5ff,transparent:true,opacity:.05,side:THREE.DoubleSide,depthWrite:false});
+  var fovE=new THREE.LineBasicMaterial({color:0x00e5ff,transparent:true,opacity:.38});
+  var footL=new THREE.LineBasicMaterial({color:0x00e5ff,transparent:true,opacity:.75});
+  var splitL=new THREE.LineDashedMaterial({color:0xffdd00,dashSize:6,gapSize:4,transparent:true,opacity:.8});
+
+  function mk(geo,mat,x,y,z){
+    x=x||0;y=y||0;z=z||0;
+    var m=new THREE.Mesh(geo,mat);
+    m.position.set(x,y,z);
+    m.castShadow=true;m.receiveShadow=true;
+    scene.add(m);return m;
+  }
+
+  // Table + grid
+  mk(new THREE.BoxGeometry(800,12,700),tabM,120,-6,0);
+  var grid=new THREE.GridHelper(600,24,0x1a1a2e,0x111118);
+  grid.position.set(120,0.5,0);scene.add(grid);
+
+  // Base plate
+  mk(new THREE.BoxGeometry(200,8,200),pla,0,4,0);
+  [[-75,-75],[75,-75],[-75,75],[75,75]].forEach(function(p){
+    mk(new THREE.CylinderGeometry(3.3,3.3,9,16),blt,p[0],4,p[1]);
+    mk(new THREE.CylinderGeometry(5.5,5.5,2,16),blt,p[0],8.5,p[1]);
+  });
+  // Dovetail socket (red)
+  mk(new THREE.BoxGeometry(29,8,29),jt1,0,4,0);
+  mk(new THREE.BoxGeometry(25,12,25),jt1,0,7,0);
+
+  // Column BOTTOM half (0→275mm)
+  var COL_H=550, HALF=275;
+  mk(new THREE.BoxGeometry(35,HALF,35),pla,0,8+HALF/2,0);
+  mk(new THREE.BoxGeometry(27,HALF-4,2),plaD,0,8+HALF/2,18.5);
+  // Dovetail pin at column base (red)
+  mk(new THREE.BoxGeometry(25,16,25),jt1,0,8+8,0);
+
+  // SPLIT SLEEVE at 275mm joint (yellow)
+  var sleeveY=8+HALF;
+  mk(new THREE.BoxGeometry(29,50,29),split,0,sleeveY,0);
+  var splitPts=[
+    new THREE.Vector3(-18,sleeveY,18),new THREE.Vector3(18,sleeveY,18),
+    new THREE.Vector3(18,sleeveY,-18),new THREE.Vector3(-18,sleeveY,-18),
+    new THREE.Vector3(-18,sleeveY,18)
+  ];
+  var splitGeo=new THREE.BufferGeometry().setFromPoints(splitPts);
+  var splitLine=new THREE.Line(splitGeo,splitL);
+  splitLine.computeLineDistances();scene.add(splitLine);
+
+  // Column TOP half (275→550mm)
+  mk(new THREE.BoxGeometry(35,HALF,35),pla,0,8+HALF+HALF/2,0);
+  mk(new THREE.BoxGeometry(27,HALF-4,2),plaD,0,8+HALF+HALF/2,18.5);
+
+  // Base gussets
+  [-1,1].forEach(function(sx){
+    var g=new THREE.Mesh(new THREE.BoxGeometry(8,40,35),plaD);
+    g.position.set(sx*(35/2+4),8+20,0);g.castShadow=true;scene.add(g);
+  });
+
+  // Arm 220x35x35
+  var ARM_L=220,armCX=35/2+ARM_L/2,armCY=8+COL_H-35/2;
+  mk(new THREE.BoxGeometry(ARM_L,35,35),pla,armCX,armCY,0);
+  mk(new THREE.BoxGeometry(ARM_L-4,2,27),plaD,armCX,armCY-16,0);
+
+  // Snap-tab T-slot (orange)
+  mk(new THREE.BoxGeometry(38,8,40),jt2,0,armCY+4,0);
+  mk(new THREE.BoxGeometry(38,4,36),jt2,35/2+8,armCY+6,0);
+  mk(new THREE.BoxGeometry(6,14,8),jt2,35/2+3,armCY+15,0);
+
+  // NEW Part 7: Extended 50mm Top-Down Joint Cover Clamp (purple highlight: top cap + 2 side walls, OPEN BOTTOM)
+  var collarMat = new THREE.MeshStandardMaterial({color: 0x9333ea, roughness: 0.3, metalness: 0.2, transparent: true, opacity: 0.9});
+  var cX = 35/2 - 2, cY = armCY;
+  mk(new THREE.BoxGeometry(50, 3, 42), collarMat, cX, cY + 17.5, 0); // Top cap wall
+  mk(new THREE.BoxGeometry(50, 35, 3), collarMat, cX, cY, -19.5);     // Left side wall
+  mk(new THREE.BoxGeometry(50, 35, 3), collarMat, cX, cY, 19.5);      // Right side wall
+
+  // Updated Arm End Pocket (cyan) — replacing the flat plate and rails
+  var pX = 220 + 35 + 12.5; // X center of pocket = 267.5
+  var pY = armCY;           // Y center of pocket outer
+  
+  // Pocket Outer Wall (cyan)
+  mk(new THREE.BoxGeometry(25, 40, 47), jt3, pX, pY - 2.5, 0);
+
+  // C920 folded base plate representation (black) sliding down into pocket
+  // Folded base is ~15mm thick in X, 40mm wide in Z, 45mm tall in Y
+  var camBaseY = pY + 2.5; 
+  mk(new THREE.BoxGeometry(15, 34, 40), camM, pX, camBaseY - 5, 0);
+
+  // C920 hinge neck extending out of the slot (+X face of pocket)
+  mk(new THREE.BoxGeometry(16, 12, 16), camR, pX + 10, camBaseY + 12, 0);
+
+  // Camera head (pointing straight down -Y)
+  // Positioned right above the pocket
+  var headX = pX + 12;
+  var headY = camBaseY + 22;
+  var headZ = 0;
+  mk(new THREE.BoxGeometry(95, 28, 50), camM, headX, headY, headZ);
+  // Lens pointing down
+  mk(new THREE.CylinderGeometry(13, 13, 6, 32), lnsR, headX, headY - 17, headZ);
+  mk(new THREE.CylinderGeometry(9, 9, 5, 32), lns, headX, headY - 18, headZ);
+
+  // FOV pyramid (from lens Y coordinate ~ headY-19 down to table)
+  var apY=headY - 20, flY=1.5, lx=headX, lz=0, hw=210, hd=140;
+  var corners=[[lx-hw,lz-hd],[lx+hw,lz-hd],[lx+hw,lz+hd],[lx-hw,lz+hd]];
+  for(var i=0;i<4;i++){
+    var c0=corners[i],c1=corners[(i+1)%4];
+    var v=new Float32Array([lx,apY,lz,c0[0],flY,c0[1],c1[0],flY,c1[1]]);
+    var fg=new THREE.BufferGeometry();fg.setAttribute('position',new THREE.BufferAttribute(v,3));fg.computeVertexNormals();
+    var fm=new THREE.Mesh(fg,fovM);fm.renderOrder=1;scene.add(fm);
+  }
+  var fp=[[-hw,-hd],[hw,-hd],[hw,hd],[-hw,hd],[-hw,-hd]].map(function(p){return new THREE.Vector3(lx+p[0],flY+.5,lz+p[1]);});
+  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(fp),footL));
+  corners.forEach(function(c){
+    var pts=[new THREE.Vector3(lx,apY,lz),new THREE.Vector3(c[0],flY+.5,c[1])];
+    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),fovE));
+  });
+  var dm=new THREE.MeshBasicMaterial({color:0x00e5ff,transparent:true,opacity:.5});
+  var dot=new THREE.Mesh(new THREE.CircleGeometry(5,16),dm);
+  dot.rotation.x=-Math.PI/2;dot.position.set(lx,.6,lz);scene.add(dot);
+
+  window.addEventListener('resize',function(){
+    renderer.setSize(window.innerWidth,window.innerHeight);
+    camera.aspect=window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+  });
+  (function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera);})();
+})();
+</script>
+</body>
+</html>

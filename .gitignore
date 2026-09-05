@@ -1,0 +1,35 @@
+# Large Dataset recordings (2.6GB+)
+datasets/
+data/
+
+# Model weights & training outputs
+saved_models/
+outputs/
+weights/
+*.pt
+*.pth
+*.zip
+*.bin
+*.tar.gz
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# OS and temporary files
+.DS_Store
+*.tmp
+scratch/
+scratch_*.jpg
+
+# Logs
+*.log
+outputs/logs/
+
+# IDE & agent configs
+.vscode/
+.agents/
+

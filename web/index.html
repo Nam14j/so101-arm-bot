@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reachy Mini + SO-101 Dashboard</title>
+  <meta name="description" content="Control dashboard for Reachy Mini and SO-101 robot arms — record, playback, and IK movement">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- ─── Header ──────────────────────────────────────────────── -->
+  <header id="app-header">
+    <div class="header-left">
+      <h1>🤖 Reachy Mini + SO-101 Dashboard</h1>
+    </div>
+    <div class="header-right" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+      <div id="status-pill" class="status-pill disconnected">
+        <span class="status-dot"></span>
+        <span id="status-text">Arms: Offline</span>
+      </div>
+      <div id="reachy-status-pill" class="status-pill disconnected">
+        <span class="status-dot" style="background-color: var(--text-muted);"></span>
+        <span>Reachy: Offline</span>
+      </div>
+      <button id="btn-connect-follower" class="btn btn-primary" onclick="toggleConnection('follower_only')" title="Connect only the follower arm for IK and XYZ movements">🦾 Connect Follower Only</button>
+      <button id="btn-connect" class="btn btn-outline" onclick="toggleConnection('both')" title="Connect both Leader and Follower arms for teleoperation">🔗 Connect Both Arms</button>
+    </div>
+  </header>
+
+  <!-- ─── Tab Bar ─────────────────────────────────────────────── -->
+  <nav id="tab-bar">
+    <button class="tab" data-tab="record" onclick="switchTab('record')">
+      <span class="tab-icon">⏺</span> Record &amp; Play
+    </button>
+    <button class="tab" data-tab="move" onclick="switchTab('move')">
+      <span class="tab-icon">🎯</span> Move to XYZ
+    </button>
+    <button class="tab" data-tab="camera" onclick="switchTab('camera')">
+      <span class="tab-icon">📷</span> Reachy Camera
+    </button>
+    <button class="tab" data-tab="controls" onclick="switchTab('controls')">
+      <span class="tab-icon">🕹️</span> Reachy Controls
+    </button>
+    <button class="tab" data-tab="models" onclick="switchTab('models')">
+      <span class="tab-icon">💾</span> Reachy Models
+    </button>
+    <button class="tab" data-tab="voice" onclick="switchTab('voice')">
+      <span class="tab-icon">🎙️</span> Voice Assistant
+    </button>
+    <button class="tab active" data-tab="logi" onclick="switchTab('logi')">
+      <span class="tab-icon">📹</span> Logitech Cam
+    </button>
+    <button class="tab" data-tab="ai" onclick="switchTab('ai')">
+      <span class="tab-icon">🧠</span> AI Training &amp; Policy
+    </button>
+  </nav>
+
+  <!-- ─── Tab Content ─────────────────────────────────────────── -->
+  <main id="tab-content">
+
+    <!-- ═══ Record & Play Tab ═══════════════════════════════════ -->
+    <section id="tab-record" class="tab-panel">
+
+      <!-- Teleoperation Card -->
+      <div class="card teleop-card">
+        <div class="card-header">
+          <span class="card-icon">🔗</span>
+          <h2>Teleoperation</h2>
+          <div id="teleop-indicator" class="teleop-indicator hidden">
+            <span class="live-dot"></span> LIVE
+          </div>
+        </div>
+        <p class="card-desc">Mirror the leader arm to the follower in real time. You can also record while teleop is active.</p>
+        <div class="btn-group">
+          <button id="btn-start-teleop" class="btn btn-accent" onclick="startTeleop()" disabled>
+            Start Teleop
+          </button>
+          <button id="btn-stop-teleop" class="btn btn-secondary" onclick="stopTeleop()" disabled>
+            Stop Teleop
+          </button>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <!-- Recording Card -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-icon">⏺</span>
+            <h2>Recording</h2>
+          </div>
+          <p class="card-desc">Capture movements from the leader arm in real time.</p>
+          <div class="btn-group">
+            <button id="btn-start-rec" class="btn btn-accent" onclick="startRecording()" disabled>
+              Start Recording
+            </button>
+            <button id="btn-stop-rec" class="btn btn-secondary" onclick="stopRecording()" disabled>
+              Stop Recording
+            </button>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Steps Recorded</span>
+            <span id="step-count" class="stat-value">0</span>
+          </div>
+          <div id="recording-indicator" class="recording-indicator hidden">
+            <span class="rec-dot"></span> REC
+          </div>
+        </div>
+
+        <!-- Playback Card -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-icon">▶</span>
+            <h2>Playback</h2>
+          </div>
+          <p class="card-desc">Replay recorded movements on the follower arm.</p>
+          <div class="btn-group">
+            <button id="btn-play" class="btn btn-accent" onclick="playRecording()" disabled>
+              Play Recording
+            </button>
+            <button id="btn-stop-play" class="btn btn-secondary" onclick="stopPlayback()" disabled>
+              Stop Playback
+            </button>
+          </div>
+          <button id="btn-home-rec" class="btn btn-outline full-width-btn" onclick="goHome()" disabled>
+            ↩ Return Home
+          </button>
+        </div>
+      </div>
+
+      <!-- Joint Angles Card -->
+      <div class="card full-width">
+        <div class="card-header">
+          <span class="card-icon">📊</span>
+          <h2>Joint Angles</h2>
+        </div>
+        <div class="angles-grid">
+          <div>
+            <h3>Leader Arm</h3>
+            <div id="leader-angles" class="angles-list">
+              <span class="no-data">Connect to view angles</span>
+            </div>
+          </div>
+          <div>
+            <h3>Follower Arm</h3>
+            <div id="follower-angles" class="angles-list">
+              <span class="no-data">Connect to view angles</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Move to XYZ Tab ════════════════════════════════════ -->
+    <section id="tab-move" class="tab-panel">
+      <div class="card center-card">
+        <div class="card-header">
+          <span class="card-icon">🎯</span>
+          <h2>Move to XYZ</h2>
+        </div>
+        <p class="card-desc">Enter target coordinates in meters. The follower arm will solve inverse kinematics and move smoothly to the target position.</p>
+
+        <div class="input-grid">
+          <div class="input-group">
+            <label for="input-x">X <span class="axis-hint">(forward / back)</span></label>
+            <div class="input-wrapper">
+              <input id="input-x" type="number" value="0.18" step="0.01" min="-0.5" max="0.5">
+              <span class="input-unit">m</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <label for="input-y">Y <span class="axis-hint">(left / right)</span></label>
+            <div class="input-wrapper">
+              <input id="input-y" type="number" value="0.00" step="0.01" min="-0.5" max="0.5">
+              <span class="input-unit">m</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <label for="input-z">Z <span class="axis-hint">(up / down)</span></label>
+            <div class="input-wrapper">
+              <input id="input-z" type="number" value="0.12" step="0.01" min="-0.5" max="0.5">
+              <span class="input-unit">m</span>
+            </div>
+          </div>
+          <div class="input-group speed-group">
+            <label for="input-speed">Speed</label>
+            <div class="input-wrapper speed-wrapper">
+              <input id="input-speed" type="range" min="0.5" max="10" step="0.5" value="3" oninput="updateSpeedLabel(this.value)">
+              <span id="speed-label" class="speed-label">3.0s</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="btn-group">
+          <button id="btn-move" class="btn btn-accent" onclick="moveToXYZ()" disabled>Move</button>
+          <button id="btn-stop-move" class="btn btn-secondary" onclick="stopMove()" disabled>Stop</button>
+          <button id="btn-home-move" class="btn btn-outline" onclick="goHome()" disabled>↩ Home</button>
+        </div>
+
+        <div id="move-status" class="status-box">Ready — connect the arms to begin</div>
+      </div>
+    </section>
+
+    <!-- ═══ Reachy Camera Tab ══════════════════════════════════ -->
+    <section id="tab-camera" class="tab-panel">
+      <div class="card full-width" style="min-height: 640px; display: flex; flex-direction: column;">
+        <div class="card-header" style="flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="card-icon">📷</span>
+            <h2>Reachy Mini Live Camera Feed</h2>
+          </div>
+          <!-- Connection controls -->
+          <div class="reachy-conn-bar" style="display: flex; align-items: center; gap: 8px;">
+            <button id="btn-toggle-detect" class="btn btn-outline" onclick="toggleObjectDetection()" style="padding: 6px 12px; font-size: 0.85rem;" title="Toggle live YOLO bounding box overlay">🎯 AI Vision: OFF</button>
+            <input id="input-reachy-ip" type="text" placeholder="e.g., 192.168.5.45" value="192.168.5.45" style="width: 180px; padding: 6px 12px; font-size: 0.85rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary);">
+            <button id="btn-connect-reachy" class="btn btn-primary" onclick="connectReachy(false)" style="padding: 6px 14px; font-size: 0.85rem;">Connect</button>
+            <button id="btn-force-reachy" class="btn btn-outline" onclick="connectReachy(true)" style="padding: 6px 12px; font-size: 0.85rem;" title="Test UI behavior without real hardware connected">Force Connect</button>
+            <button id="btn-disconnect-reachy" class="btn btn-secondary hidden" onclick="disconnectReachy()" style="padding: 6px 14px; font-size: 0.85rem;">Disconnect</button>
+          </div>
+        </div>
+
+        <!-- Connection states -->
+        <div id="reachy-cam-placeholder" class="reachy-placeholder" style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 48px 24px; text-align: center; background: rgba(255, 255, 255, 0.015); border-radius: var(--radius-sm); border: 1px dashed var(--border); margin-top: 16px;">
+          <div class="reachy-icon" style="font-size: 3.2rem; margin-bottom: 12px; filter: drop-shadow(0 0 12px rgba(0, 229, 255, 0.3));">🤖</div>
+          <h3 style="font-size: 1.2rem; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">Reachy Mini Offline</h3>
+          <p class="card-desc" style="max-width: 480px; margin: 0; font-size: 0.9rem;">Enter the robot's IP address above and click Connect to view the camera feed.</p>
+        </div>
+
+        <!-- Expanded Full-Width Large Video Stream Area -->
+        <div id="reachy-cam-stream-container" class="hidden" style="flex: 1; display: flex; flex-direction: column; margin-top: 16px; min-height: 560px; height: 560px; width: 100%;">
+          <!-- Live Feed Container (Large Video Viewport with Tiny FPS Counter) -->
+          <div style="position: relative; background: #000; border-radius: var(--radius-sm); border: 1px solid var(--border); overflow: hidden; display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; flex: 1;">
+            <!-- Live Image Stream -->
+            <img id="reachy-stream-img" src="" alt="" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1;">
+            
+            <!-- Tiny FPS Counter (Bottom Left) -->
+            <div id="fps-counter" style="position: absolute; bottom: 12px; left: 12px; font-size: 0.75rem; font-family: monospace; color: rgba(0, 229, 255, 0.9); background: rgba(0, 0, 0, 0.65); padding: 4px 10px; border-radius: 4px; border: 1px solid rgba(0, 229, 255, 0.3); font-weight: 600; z-index: 5; pointer-events: none; letter-spacing: 0.05em;">-- FPS</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Reachy Controls Tab ════════════════════════════════ -->
+    <section id="tab-controls" class="tab-panel">
+      <div class="card center-card" style="max-width: 650px;">
+        <div class="card-header" style="margin-bottom: 16px;">
+          <span class="card-icon">🕹️</span>
+          <h2>Reachy Mini Robot Controls</h2>
+        </div>
+
+        <!-- Reachy Control Panel -->
+        <div id="reachy-control-panel" style="width: 100%; display: flex; flex-direction: column; gap: 16px; background: #141414; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 24px;">
+
+          <!-- ═══ ANTENNAS SECTION ═══ -->
+          <div class="rcp-section">
+            <div class="rcp-section-header">
+              <span class="rcp-section-icon">| |</span>
+              <span class="rcp-section-title">ANTENNAS</span>
+            </div>
+            <div class="rcp-row" style="gap: 14px;">
+              <!-- Left Antenna -->
+              <div class="rcp-control-box" style="flex: 1;">
+                <div class="rcp-label-row">
+                  <span class="rcp-label-bold">Left</span>
+                  <span id="rcp-antenna-left-val" class="rcp-label-value">0.000 rad</span>
+                </div>
+                <div class="rcp-slider-row">
+                  <canvas id="rcp-arc-antenna-left" class="rcp-arc-gauge" width="40" height="40"></canvas>
+                  <input id="rcp-antenna-left" type="range" class="rcp-slider" min="-180" max="180" value="0" step="1">
+                </div>
+              </div>
+              <!-- Right Antenna -->
+              <div class="rcp-control-box" style="flex: 1;">
+                <div class="rcp-label-row">
+                  <span class="rcp-label-bold">Right</span>
+                  <span id="rcp-antenna-right-val" class="rcp-label-value">0.000 rad</span>
+                </div>
+                <div class="rcp-slider-row">
+                  <input id="rcp-antenna-right" type="range" class="rcp-slider" min="-180" max="180" value="0" step="1">
+                  <canvas id="rcp-arc-antenna-right" class="rcp-arc-gauge" width="40" height="40"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ═══ HEAD SECTION ═══ -->
+          <div class="rcp-section">
+            <div class="rcp-section-header">
+              <span class="rcp-section-icon">👀</span>
+              <span class="rcp-section-title">HEAD &amp; NECK</span>
+            </div>
+            <div class="rcp-row" style="gap: 14px; flex-wrap: wrap;">
+              <!-- Pitch / Yaw Pad -->
+              <div class="rcp-control-box" style="flex: 2; min-width: 220px;">
+                <div class="rcp-label-row">
+                  <span class="rcp-label-bold">Pitch / Yaw</span>
+                </div>
+                <div class="rcp-label-row" style="margin-top: 2px;">
+                  <span id="rcp-head-xy-val" class="rcp-label-value" style="font-size: 0.72rem;">X: 0.000  Y: 0.000</span>
+                </div>
+                <div class="rcp-pad-container">
+                  <canvas id="rcp-pad-head" class="rcp-joystick-pad" width="200" height="200"></canvas>
+                </div>
+              </div>
+
+              <!-- Position Z (Neck Height Y-Axis Up/Down) -->
+              <div class="rcp-control-box" style="flex: 1; min-width: 140px; display: flex; flex-direction: column; align-items: center;">
+                <div class="rcp-label-row" style="width: 100%;">
+                  <span class="rcp-label-bold">Neck Height (Z / Y-Axis)</span>
+                </div>
+                <div class="rcp-label-row" style="width: 100%; margin-top: 2px;">
+                  <span id="rcp-head-z-val" class="rcp-label-value">0.000 m</span>
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 180px; margin-top: 8px;">
+                  <input id="rcp-head-z" type="range" class="rcp-slider vertical-slider" min="-30" max="30" value="0" step="1" style="transform: rotate(-90deg); width: 140px;">
+                </div>
+              </div>
+            </div>
+
+            <!-- Roll Slider -->
+            <div class="rcp-control-box" style="margin-top: 12px;">
+              <div class="rcp-label-row">
+                <span class="rcp-label-bold">Head Roll (Tilt Side-to-Side)</span>
+                <span id="rcp-head-roll-val" class="rcp-label-value">0.000 rad</span>
+              </div>
+              <div class="rcp-slider-row">
+                <input id="rcp-head-roll" type="range" class="rcp-slider" min="-30" max="30" value="0" step="1">
+              </div>
+            </div>
+          </div>
+
+          <!-- ═══ BODY SECTION ═══ -->
+          <div class="rcp-section">
+            <div class="rcp-section-header">
+              <span class="rcp-section-icon">🔄</span>
+              <span class="rcp-section-title">BODY</span>
+            </div>
+            <div class="rcp-control-box">
+              <div class="rcp-label-row">
+                <span class="rcp-label-bold">Torso Yaw</span>
+                <span id="rcp-torso-yaw-val" class="rcp-label-value">0.000 rad</span>
+              </div>
+              <div class="rcp-slider-row">
+                <canvas id="rcp-arc-torso" class="rcp-arc-gauge" width="40" height="40"></canvas>
+                <input id="rcp-torso-yaw" type="range" class="rcp-slider" min="-45" max="45" value="0" step="1">
+              </div>
+            </div>
+          </div>
+
+          <!-- Reset All Button -->
+          <button id="rcp-reset-all" class="rcp-reset-btn" onclick="rcpResetAll()">⦿ Reset All Controls</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Reachy Models Tab ══════════════════════════════════ -->
+    <section id="tab-models" class="tab-panel">
+      <div class="card center-card">
+        <div class="card-header">
+          <span class="card-icon">💾</span>
+          <h2>Edge Model Deployment</h2>
+        </div>
+        <p class="card-desc">Transfer and deploy neural network models directly from your host Mac onto Reachy Mini's local filesystem for edge processing.</p>
+        
+        <!-- Offline Warning Banner -->
+        <div id="reachy-offline-warning" class="warning-banner" style="margin-top: 16px; padding: 12px 16px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: var(--radius-sm); color: #f87171; font-size: 0.85rem; font-weight: 500; display: flex; align-items: center; gap: 8px;">
+          <span>⚠️</span>
+          <span>Reachy Mini is offline. Connect Reachy Mini to enable model deployments.</span>
+        </div>
+        
+        <div class="model-download-list" style="margin-top: 20px;">
+          <!-- YOLOv8 -->
+          <div class="model-item" style="padding: 16px; border-radius: var(--radius-sm); background: rgba(255, 255, 255, 0.015); border: 1px solid var(--border);">
+            <div class="model-info" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <span class="model-name" style="font-weight: 600; color: var(--text-primary);">YOLOv8 Object Detection</span>
+              <span class="model-size" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">6.2 MB</span>
+            </div>
+            <div class="model-control">
+              <button id="btn-dl-yolov8" class="btn btn-accent full-width-btn" onclick="downloadModel('yolov8')" disabled>
+                Deploy to Reachy
+              </button>
+              <div id="progress-yolov8" class="download-progress-container hidden">
+                <div class="progress-bar-wrapper" style="width: 100%; height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden; margin: 12px 0 6px 0;">
+                  <div id="bar-yolov8" class="progress-bar-fill" style="width: 0%; height: 100%; background: var(--accent); transition: width 0.2s ease;"></div>
+                </div>
+                <div class="progress-stats" style="display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--text-secondary); font-weight: 500; font-variant-numeric: tabular-nums;">
+                  <span id="speed-yolov8">0.0 MB/s</span>
+                  <span id="percent-yolov8">0%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Voice Assistant Tab ═══════════════════════════════════ -->
+    <section id="tab-voice" class="tab-panel">
+      <div class="card full-width" style="max-width: 100%;">
+        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="card-icon">🎙️</span>
+            <h2>Voice Assistant</h2>
+            <div id="voice-status-badge" class="voice-badge offline">
+              <span class="voice-badge-dot"></span>
+              <span id="voice-status-text">Offline</span>
+            </div>
+          </div>
+          <div class="btn-group" style="margin: 0;">
+            <button id="btn-voice-start" class="btn btn-accent" onclick="startVoiceAssistant()">▶ Start</button>
+            <button id="btn-voice-stop" class="btn btn-secondary" onclick="stopVoiceAssistant()" disabled>⏹ Stop</button>
+            <button id="btn-voice-clear" class="btn btn-outline" onclick="clearVoiceLogs()">🗑 Clear</button>
+          </div>
+        </div>
+        <p class="card-desc">Run voice_interface.py and see live output below — exactly like running it in VS Code's terminal.</p>
+
+        <!-- Terminal Output -->
+        <div id="voice-terminal" class="voice-terminal">
+          <div id="voice-terminal-content" class="voice-terminal-content">
+            <span class="vt-system">Voice Assistant is not running. Click ▶ Start to begin.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Logitech Camera Tab ═══════════════════════════════════ -->
+    <section id="tab-logi" class="tab-panel active">
+      <div class="card full-width" style="min-height: 640px; display: flex; flex-direction: column;">
+        <div class="card-header" style="flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="card-icon">📹</span>
+            <h2>Logitech HD Pro Webcam C920 — 1080p</h2>
+            <div id="logi-status-badge" style="display: flex; align-items: center; gap: 5px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 20px; padding: 3px 10px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em;">
+              <span id="logi-status-dot" style="width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); display: inline-block;"></span>
+              <span id="logi-status-text" style="color: var(--text-muted);">Connecting...</span>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="padding: 4px 10px; font-size: 0.78rem; font-weight: 700; background: rgba(0,229,255,0.08); border: 1px solid rgba(0,229,255,0.3); border-radius: 20px; color: #00e5ff; letter-spacing: 0.04em;">🦕 Grounding DINO</span>
+            <input id="input-world-prompts" type="text" placeholder="e.g. robot arm, tool, screw, wire" value="ball, robot arm, tool, camera, hand, screw, lego, wire, cup, pen, bottle, block" style="width: 280px; padding: 6px 10px; font-size: 0.82rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary);" onchange="updateWorldPrompts(this.value)" title="What to detect — separate items with commas">
+            <button id="btn-toggle-logi-grid" class="btn btn-outline" onclick="toggleLogiGrid()" style="padding: 6px 12px; font-size: 0.85rem;" title="Toggle Interactive XY Grid Overlay">🌐 Grid: ON</button>
+            <button id="btn-toggle-logi-detect" class="btn btn-outline" onclick="toggleLogiDetection()" style="padding: 6px 12px; font-size: 0.85rem;" title="Toggle live AI Vision detection overlay">🎯 AI Vision: OFF</button>
+            <button class="btn btn-secondary" onclick="reconnectLogiStream()" style="padding: 6px 12px; font-size: 0.85rem;">↻ Reconnect</button>
+          </div>
+        </div>
+
+        <!-- Coordinate / Calibration Toolbar -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 10px 16px; background: rgba(0,229,255,0.03); border: 1px solid rgba(0,229,255,0.15); border-radius: 8px;">
+          <div style="display: flex; align-items: center; gap: 14px; font-family: monospace; font-size: 0.85rem; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="color: var(--text-secondary); font-weight: 600;">📍 Target:</span>
+              <span id="logi-click-coords-robot" style="color: #10b981; font-weight: 700; font-size: 0.95rem;">(Click video to target)</span>
+            </div>
+            <div id="calib-status-badge" style="display: flex; align-items: center; gap: 5px; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 14px;">
+              <span id="calib-status-dot" style="width: 7px; height: 7px; border-radius: 50%; background: #6b7280; display: inline-block;"></span>
+              <span id="calib-status-text" style="color: var(--text-muted); font-size: 0.78rem;">No Calibration</span>
+            </div>
+            <!-- Table Z Height -->
+            <div style="display: flex; align-items: center; gap: 6px; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 14px;">
+              <span style="color: var(--text-muted); font-size: 0.78rem;">⬇ Table</span>
+              <span id="table-z-display" style="color: #f59e0b; font-size: 0.82rem; font-weight: 600; font-family: monospace;">Z: 0.0200m</span>
+              <button onclick="adjustTableZ(0.005)" style="padding: 1px 6px; font-size: 0.75rem; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 3px; color: var(--text-primary); cursor: pointer;" title="Raise Z by 5mm">▲</button>
+              <button onclick="adjustTableZ(-0.005)" style="padding: 1px 6px; font-size: 0.75rem; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 3px; color: var(--text-primary); cursor: pointer;" title="Lower Z by 5mm">▼</button>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-outline" onclick="setTableHeight()" style="padding: 6px 12px; font-size: 0.82rem;" title="Move arm to table surface by hand, then click this">📏 Set Table Height</button>
+            <button id="btn-open-calib" class="btn btn-outline" onclick="openCalibrationPanel()" style="padding: 6px 12px; font-size: 0.82rem;">🎯 Calibrate</button>
+            <button id="btn-send-click-move" class="btn btn-accent" onclick="sendClickedPointToMoveTab()" style="padding: 6px 14px; font-size: 0.85rem;" disabled>🚀 Send to Move-to-XYZ</button>
+          </div>
+        </div>
+
+        <!-- Live Detected Objects on Table Grid Strip -->
+        <div id="logi-detected-objects-container" style="display: none; margin-top: 10px; padding: 10px 14px; background: rgba(0, 229, 255, 0.04); border: 1px solid rgba(0, 229, 255, 0.2); border-radius: 8px; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.82rem;">
+            <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #00e5ff;">
+              <span>🎯 Objects on Grid:</span>
+              <span id="detected-objects-count" style="background: rgba(0, 229, 255, 0.15); padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; color: #00e5ff;">0 found</span>
+            </div>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">Click [🚀 Move Here] to move arm directly to object</span>
+          </div>
+          <div id="detected-objects-list" style="display: flex; gap: 8px; flex-wrap: wrap; max-height: 140px; overflow-y: auto;">
+            <!-- Dynamically populated object cards -->
+          </div>
+        </div>
+
+        <!-- Calibration Panel (hidden by default) -->
+        <div id="calib-panel" style="display: none; margin-top: 10px; padding: 14px 16px; background: rgba(255,153,0,0.05); border: 1px solid rgba(255,153,0,0.3); border-radius: 8px; flex-direction: column; gap: 10px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+            <div style="font-weight: 700; color: #ff9900; font-size: 0.92rem;">🎯 Manual Calibration — Touch Points & Coordinates</div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+              <button class="btn btn-outline" onclick="calibAddPoint()" style="padding: 5px 12px; font-size: 0.82rem;">➕ Add Point</button>
+              <button class="btn btn-accent" id="btn-compute-calib" onclick="calibCompute()" style="padding: 5px 14px; font-size: 0.82rem;" disabled>✓ Compute Calibration</button>
+              <button class="btn btn-secondary" onclick="calibReset()" style="padding: 5px 10px; font-size: 0.82rem;">🗑 Reset</button>
+              <button class="btn btn-secondary" onclick="closeCalibrationPanel()" style="padding: 5px 10px; font-size: 0.82rem;">✕ Close</button>
+            </div>
+          </div>
+
+          <div style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;">
+            <b>How:</b> 1) Click <b>➕ Add Point</b>. 2) Click any mark on the camera view. 3) Move the arm tip to that spot and click <b>📍 Read Arm Position</b> (or enter coordinates). Repeat for 4+ spots across your desk, then click <b>✓ Compute Calibration</b>.
+          </div>
+
+          <!-- Points list -->
+          <div id="calib-points-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto;"></div>
+
+          <!-- Click video prompt banner -->
+          <div id="calib-pending" style="display: none; font-size: 0.82rem; color: #ff9900; padding: 8px 12px; background: rgba(255,153,0,0.1); border: 1px solid rgba(255,153,0,0.3); border-radius: 6px;">
+            📌 <b>Click a point on the live video stream below</b> to select its pixel location.
+          </div>
+
+          <!-- New point form -->
+          <div id="calib-new-point-form" style="display: none; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; background: rgba(255,255,255,0.03); border-radius: 6px; border: 1px solid var(--border);">
+            <button class="btn btn-outline" onclick="calibReadArmPosition()" style="padding: 5px 12px; font-size: 0.82rem;" title="Move follower arm by hand to touch the point, then click this">📍 Read Arm Position</button>
+            <span style="color: var(--text-muted); font-size: 0.78rem;">or type:</span>
+            <span style="color: var(--text-secondary); font-size: 0.8rem;">X (m):</span>
+            <input id="calib-input-rx" type="number" step="0.001" value="0.200" style="width: 90px; padding: 4px 8px; font-size: 0.82rem; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+            <span style="color: var(--text-secondary); font-size: 0.8rem;">Y (m):</span>
+            <input id="calib-input-ry" type="number" step="0.001" value="0.000" style="width: 90px; padding: 4px 8px; font-size: 0.82rem; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+            <button class="btn btn-accent" onclick="calibConfirmPoint()" style="padding: 5px 14px; font-size: 0.82rem;">✓ Confirm Point</button>
+            <button class="btn btn-secondary" onclick="calibCancelPoint()" style="padding: 5px 10px; font-size: 0.82rem;">✕ Cancel</button>
+          </div>
+        </div>
+
+
+        <!-- Live 1080p Feed + Interactive Canvas -->
+        <div style="flex: 1; display: flex; flex-direction: column; margin-top: 12px; min-height: 720px; height: 720px; width: 100%;">
+          <div id="logi-viewport-container" style="position: relative; background: #000; border-radius: var(--radius-sm); border: 1px solid var(--border); overflow: hidden; display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; flex: 1;">
+            <!-- Live Image Stream -->
+            <img id="logi-stream-img" src="/api/logi_camera" alt="Logitech Feed"
+              style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1;"
+              onload="onLogiStreamLoaded();"
+              onerror="onLogiStreamError(this);">
+
+            <!-- Interactive Click & Grid Overlay Canvas -->
+            <canvas id="logi-grid-canvas" width="1920" height="1080"
+              style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; z-index: 10; cursor: crosshair; pointer-events: auto !important; touch-action: none;"></canvas>
+
+            <!-- No-signal overlay -->
+            <div id="logi-offline-overlay" style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:2;background:rgba(0,0,0,0.7);color:var(--text-muted);gap:10px;pointer-events:none;">
+              <div style="font-size:2.5rem;">📹</div>
+              <div style="font-size:1rem;font-weight:600;">Waiting for camera...</div>
+              <div style="font-size:0.8rem;">Grant camera permission in System Settings → Privacy → Camera</div>
+            </div>
+
+            <!-- FPS Counter -->
+            <div id="logi-fps-counter" style="position: absolute; bottom: 12px; left: 12px; font-size: 0.75rem; font-family: monospace; color: rgba(0,229,255,0.9); background: rgba(0,0,0,0.65); padding: 4px 10px; border-radius: 4px; border: 1px solid rgba(0,229,255,0.3); font-weight: 600; z-index: 5; pointer-events: none; letter-spacing: 0.05em;">-- FPS</div>
+
+            <!-- Resolution badge -->
+            <div style="position: absolute; bottom: 12px; right: 12px; font-size: 0.7rem; font-family: monospace; color: rgba(255,153,0,0.85); background: rgba(0,0,0,0.65); padding: 4px 10px; border-radius: 4px; border: 1px solid rgba(255,153,0,0.3); font-weight: 600; z-index: 5; pointer-events: none;">1920×1080 HD</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ AI Training & Autonomous Policy Tab ═══════════════════ -->
+    <section id="tab-ai" class="tab-panel">
+      <!-- Sub-Navigation Pills -->
+      <div style="display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; align-items: center; justify-content: space-between;">
+        <div style="display: flex; gap: 8px;">
+          <button id="ai-subtab-record" class="btn btn-accent" onclick="switchAISubTab('record')">🔴 1. Record Episodes</button>
+          <button id="ai-subtab-train" class="btn btn-outline" onclick="switchAISubTab('train')">⚡ 2. Train ACT Model</button>
+          <button id="ai-subtab-eval" class="btn btn-outline" onclick="switchAISubTab('eval')">🤖 3. Autonomous Ball Picker</button>
+        </div>
+        <div id="ai-global-status-badge" style="font-size: 0.82rem; padding: 4px 12px; border-radius: 20px; background: rgba(0,229,255,0.1); border: 1px solid rgba(0,229,255,0.3); color: #00e5ff; font-weight: 600;">
+          Ready to Train
+        </div>
+      </div>
+
+      <!-- ─── SUB-PANEL 1: RECORD DEMONSTRATIONS ─── -->
+      <div id="ai-panel-record" class="ai-subpanel" style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="card full-width">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="card-icon">🔴</span>
+              <h2>Episode Recording Studio (Teleoperation Data Collection)</h2>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 0.85rem; color: var(--text-secondary);">Dataset:</span>
+              <input id="ai-input-dataset-name" type="text" value="pick_ball_so101" style="width: 160px; padding: 4px 10px; font-size: 0.85rem; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);" onchange="onAIDatasetChanged()">
+              <span style="font-size: 0.85rem; color: var(--text-secondary);">Task:</span>
+              <input id="ai-input-task-desc" type="text" value="Pick up the ball from the desk" style="width: 240px; padding: 4px 10px; font-size: 0.85rem; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+            </div>
+          </div>
+
+          <!-- Workflow explanation banner -->
+          <div style="background: rgba(0, 229, 255, 0.04); border: 1px solid rgba(0, 229, 255, 0.2); border-radius: var(--radius-sm); padding: 12px 16px; margin: 12px 0; font-size: 0.85rem; line-height: 1.5; color: var(--text-secondary);">
+            💡 <b>How to record:</b> 1) Connect Leader &amp; Follower arms. 2) Click <b>▶ Start Episode</b> (or press <kbd>Space</kbd>). 3) Move the leader arm to pick up the ball. 4) Click <b>💾 Save Episode</b> (or press <kbd>Space</kbd>). 5) Move the ball to a different spot and repeat <b>30–50 times</b>.
+          </div>
+
+          <!-- Active Recording Controls Card -->
+          <div style="display: flex; flex-direction: column; gap: 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 18px; align-items: center; justify-content: center; text-align: center;">
+            <div id="ai-rec-state-box" style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: center;">
+              <div id="ai-rec-timer-badge" style="font-size: 1.4rem; font-family: monospace; font-weight: 700; color: var(--text-muted); background: rgba(0,0,0,0.5); padding: 6px 18px; border-radius: 8px; border: 1px solid var(--border);">0.0s (0 frames)</div>
+              <div id="ai-rec-count-badge" style="font-size: 1rem; font-weight: 600; color: #ff9900; background: rgba(255,153,0,0.1); padding: 6px 16px; border-radius: 8px; border: 1px solid rgba(255,153,0,0.3);">Episodes: 0 / 30</div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display: flex; gap: 12px; margin-top: 10px; flex-wrap: wrap; justify-content: center;">
+              <button id="btn-ai-start-rec" class="btn btn-accent" onclick="startAIEpisode()" style="font-size: 1rem; padding: 10px 24px;">
+                🔴 Start Recording Episode <span style="font-size: 0.75rem; opacity: 0.8; margin-left: 6px;">[Space]</span>
+              </button>
+              <button id="btn-ai-save-rec" class="btn btn-primary" onclick="stopAIEpisode(true)" style="display: none; font-size: 1rem; padding: 10px 24px;">
+                💾 Save Episode <span style="font-size: 0.75rem; opacity: 0.8; margin-left: 6px;">[Space]</span>
+              </button>
+              <button id="btn-ai-discard-rec" class="btn btn-secondary" onclick="stopAIEpisode(false)" style="display: none; font-size: 0.9rem; padding: 10px 18px;">
+                🗑 Discard &amp; Retry
+              </button>
+            </div>
+          </div>
+
+          <!-- Recorded Episodes Library Table -->
+          <div style="margin-top: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <h3 style="font-size: 1rem; font-weight: 600;">Recorded Episodes Library</h3>
+              <button class="btn btn-outline" onclick="loadAIDatasetInfo()" style="padding: 4px 10px; font-size: 0.78rem;">🔄 Refresh</button>
+            </div>
+            <div id="ai-episodes-table-container" style="max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+              <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+                <thead style="background: rgba(255,255,255,0.04); border-bottom: 1px solid var(--border); color: var(--text-secondary);">
+                  <tr>
+                    <th style="padding: 8px 12px;">#</th>
+                    <th style="padding: 8px 12px;">Preview</th>
+                    <th style="padding: 8px 12px;">Duration</th>
+                    <th style="padding: 8px 12px;">Frames</th>
+                    <th style="padding: 8px 12px;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="ai-episodes-list-body">
+                  <tr><td colspan="5" style="padding: 24px; text-align: center; color: var(--text-muted);">No episodes recorded yet in this dataset. Click Start Recording above!</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── SUB-PANEL 2: TRAIN ACT MODEL ─── -->
+      <div id="ai-panel-train" class="ai-subpanel" style="display: none; flex-direction: column; gap: 16px;">
+        <div class="card full-width">
+          <div class="card-header">
+            <span class="card-icon">⚡</span>
+            <h2>ACT Neural Network Policy Training</h2>
+          </div>
+          <p class="card-desc">Trains an Action Chunking with Transformers (ACT) model that maps camera pixels + joint positions into 30-step arm trajectory chunks.</p>
+
+          <!-- Training Settings Grid -->
+          <div class="input-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin: 16px 0;">
+            <div class="input-group">
+              <label for="ai-train-select-dataset">Dataset</label>
+              <select id="ai-train-select-dataset" style="width: 100%; padding: 8px 12px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);"></select>
+            </div>
+            <div class="input-group">
+              <label for="ai-train-steps">Training Steps</label>
+              <select id="ai-train-steps" style="width: 100%; padding: 8px 12px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                <option value="5000">5,000 steps (~12 mins, Fast Test)</option>
+                <option value="10000">10,000 steps (~22 mins, Balanced)</option>
+                <option value="25000" selected>25,000 steps (~55 mins, Deep Learning)</option>
+                <option value="50000">50,000 steps (~1.8 hrs, Maximum Precision)</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label for="ai-train-device">Compute Accelerator</label>
+              <select id="ai-train-device" style="width: 100%; padding: 8px 12px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                <option value="mps" selected>Apple Silicon GPU (MPS)</option>
+                <option value="cpu">CPU Only</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label for="ai-train-batch">Batch Size</label>
+              <input id="ai-train-batch" type="number" value="8" style="width: 100%; padding: 8px 12px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+            </div>
+          </div>
+
+          <!-- Training Buttons -->
+          <div class="btn-group" style="margin-bottom: 16px;">
+            <button id="btn-start-train" class="btn btn-accent" onclick="startAITraining()">🚀 Start Model Training</button>
+            <button id="btn-stop-train" class="btn btn-secondary" onclick="stopAITraining()" disabled>⏹ Stop Training</button>
+          </div>
+
+          <!-- Live Training Progress Monitor -->
+          <div id="ai-train-monitor" style="background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+              <span id="ai-train-step-label" style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary);">Step: 0 / 25,000</span>
+              <div style="display: flex; gap: 12px; font-size: 0.82rem; font-family: monospace;">
+                <span id="ai-train-loss-badge" style="color: #10b981;">Loss: --</span>
+                <span id="ai-train-speed-badge" style="color: #00e5ff;">Speed: -- FPS</span>
+                <span id="ai-train-eta-badge" style="color: #ff9900;">ETA: --:--:--</span>
+              </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div style="width: 100%; height: 10px; background: rgba(255,255,255,0.08); border-radius: 5px; overflow: hidden;">
+              <div id="ai-train-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #00e5ff, #10b981); transition: width 0.3s ease;"></div>
+            </div>
+
+            <!-- Live Scrolling Terminal Console -->
+            <div style="margin-top: 6px;">
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; font-family: monospace;">TRAINING CONSOLE OUTPUT:</div>
+              <div id="ai-train-terminal" style="background: #0a0e17; border: 1px solid #1e293b; border-radius: 6px; padding: 10px 14px; font-family: monospace; font-size: 0.78rem; color: #a5f3fc; height: 180px; overflow-y: auto; white-space: pre-wrap; line-height: 1.4;">
+Ready. Click "Start Model Training" to begin training.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── SUB-PANEL 3: AUTONOMOUS BALL PICKER ─── -->
+      <div id="ai-panel-eval" class="ai-subpanel" style="display: none; flex-direction: column; gap: 16px;">
+        <div class="card full-width">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="card-icon">🤖</span>
+              <h2>Autonomous Ball Picker (Closed-Loop Model Inference)</h2>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 0.85rem; color: var(--text-secondary);">Model Checkpoint:</span>
+              <select id="ai-eval-select-model" style="width: 280px; padding: 6px 12px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);"></select>
+              <button class="btn btn-outline" onclick="loadAIModelsList()" style="padding: 4px 10px; font-size: 0.78rem;">🔄</button>
+            </div>
+          </div>
+
+          <p class="card-desc">The trained neural network watches the camera feed in real time, generates joint trajectories, and picks up the ball autonomously!</p>
+
+          <!-- Action Controls & Return Home -->
+          <div style="display: flex; gap: 12px; margin: 12px 0; flex-wrap: wrap;">
+            <button id="btn-start-eval" class="btn btn-accent" onclick="startAIEval()" style="font-size: 1rem; padding: 10px 24px;">
+              🚀 Run Autonomous Ball Picker
+            </button>
+            <button id="btn-stop-eval" class="btn btn-secondary" onclick="stopAIEval()" disabled style="font-size: 1rem; padding: 10px 24px;">
+              ⏹ Emergency Stop
+            </button>
+            <button id="btn-eval-home" class="btn btn-outline" onclick="returnToStartingPose()" style="font-size: 0.95rem; padding: 10px 20px; border-color: #3b82f6; color: #60a5fa;">
+              🏠 Return to Starting / Ready Pose
+            </button>
+          </div>
+
+          <div id="ai-eval-status-box" style="padding: 12px 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.85rem; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <span id="ai-eval-status-text">Autonomous execution idle. Select a model and click Run.</span>
+            <span id="ai-eval-fps-badge" style="font-family: monospace; color: #00e5ff; font-weight: 600;">-- FPS</span>
+          </div>
+
+          <!-- Live Camera Stream & Trajectory Telemetry Grid -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
+            <!-- Live Camera Feed Container -->
+            <div style="background: rgba(0,0,0,0.5); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">📷 Live Vision Feed</span>
+                <span style="font-size: 0.75rem; color: #10b981; font-family: monospace;">● Live Feed Active</span>
+              </div>
+              <div style="position: relative; width: 100%; aspect-ratio: 16/9; background: #0a0e17; border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                <img id="ai-eval-camera-feed" src="/api/logi_camera" alt="Live Camera" style="width: 100%; height: 100%; object-fit: contain;">
+              </div>
+            </div>
+
+            <!-- Real-Time Joint Angles & Future Trajectory Chunk Telemetry -->
+            <div style="background: rgba(0,0,0,0.5); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">📈 Real-Time Joint Angles & Policy Prediction</span>
+                <span id="ai-eval-chunk-badge" style="font-size: 0.75rem; color: #00e5ff; font-family: monospace;">30-Step Horizon</span>
+              </div>
+
+              <!-- Joint Angles Live Table -->
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-family: monospace; font-size: 0.8rem;">
+                <div style="background: rgba(255,255,255,0.04); padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);">
+                  <div style="color: var(--text-muted); font-size: 0.7rem;">Pan</div>
+                  <div id="ai-eval-pan" style="font-weight: 700; color: #38bdf8;">--°</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.04); padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);">
+                  <div style="color: var(--text-muted); font-size: 0.7rem;">Lift</div>
+                  <div id="ai-eval-lift" style="font-weight: 700; color: #38bdf8;">--°</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.04); padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);">
+                  <div style="color: var(--text-muted); font-size: 0.7rem;">Elbow</div>
+                  <div id="ai-eval-elbow" style="font-weight: 700; color: #38bdf8;">--°</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.04); padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);">
+                  <div style="color: var(--text-muted); font-size: 0.7rem;">Wrist Flex</div>
+                  <div id="ai-eval-wristf" style="font-weight: 700; color: #38bdf8;">--°</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.04); padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);">
+                  <div style="color: var(--text-muted); font-size: 0.7rem;">Wrist Roll</div>
+                  <div id="ai-eval-wristr" style="font-weight: 700; color: #38bdf8;">--°</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.04); padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);">
+                  <div style="color: var(--text-muted); font-size: 0.7rem;">Gripper</div>
+                  <div id="ai-eval-gripper" style="font-weight: 700; color: #4ade80;">--°</div>
+                </div>
+              </div>
+
+              <!-- Live Trajectory Graph Canvas -->
+              <div style="margin-top: 4px;">
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; font-family: monospace;">TRAJECTORY PREDICTION WAVEFORM:</div>
+                <canvas id="ai-eval-trajectory-canvas" width="400" height="120" style="width: 100%; height: 120px; background: #0a0e17; border: 1px solid #1e293b; border-radius: 6px;"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ─── Video Replay Modal Dialog ────────────────────────── -->
+  <div id="ai-video-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); z-index: 9999; align-items: center; justify-content: center; padding: 20px;">
+    <div style="background: #0f172a; border: 1px solid var(--border); border-radius: var(--radius-md); width: 100%; max-width: 720px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);">
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02);">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.1rem;">🎬</span>
+          <h3 id="ai-video-modal-title" style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin: 0;">Episode Video Replay</h3>
+        </div>
+        <button onclick="closeEpisodeVideoModal()" class="btn btn-outline" style="padding: 4px 10px; font-size: 0.85rem; border-radius: 6px;">✕</button>
+      </div>
+
+      <!-- Video Player Stream Container -->
+      <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+        <div style="width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 1px solid #1e293b;">
+          <img id="ai-video-modal-stream" src="" alt="Episode Video Stream" style="width: 100%; height: 100%; object-fit: contain;">
+        </div>
+
+        <!-- Player Controls -->
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <span style="font-size: 0.8rem; color: var(--text-secondary);">Speed:</span>
+            <button class="btn btn-outline" onclick="setEpisodeVideoSpeed(0.5)" style="padding: 3px 8px; font-size: 0.75rem;">0.5x</button>
+            <button class="btn btn-outline" onclick="setEpisodeVideoSpeed(1.0)" style="padding: 3px 8px; font-size: 0.75rem;">1.0x</button>
+            <button class="btn btn-outline" onclick="setEpisodeVideoSpeed(2.0)" style="padding: 3px 8px; font-size: 0.75rem;">2.0x</button>
+          </div>
+          <button id="btn-modal-arm-replay" class="btn btn-accent" style="padding: 6px 16px; font-size: 0.85rem;">
+            🦾 Replay on Physical Arm
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Toast Container ─────────────────────────────────────── -->
+  <div id="toast-container"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
