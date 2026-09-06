@@ -36,7 +36,7 @@ sleep 1
 
 # Step 2: Launch Arm RL Training in Background with Caffeinate
 RL_STEPS=50000000
-caffeinate -dis "$PYTHON_BIN" "$SCRIPT_DIR/train_rl_ppo.py" --num_envs 8 --timesteps $RL_STEPS > "$LOG_DIR/train_rl.log" 2>&1 &
+caffeinate -dis "$PYTHON_BIN" "$SCRIPT_DIR/train_rl_ppo.py" --timesteps $RL_STEPS > "$LOG_DIR/train_rl.log" 2>&1 &
 RL_PID=$!
 
 # Step 3: Launch Vision AI Training in Background with Caffeinate

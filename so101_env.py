@@ -79,7 +79,6 @@ class SO101PickEnv(gym.Env):
         self.table_geom_id    = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "table_solid")
         self.fixed_jaw_geom_id  = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "fixed_jaw_collider")
         self.moving_jaw_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "moving_jaw_collider")
-        self.inner_pad_ids = {self.fixed_jaw_geom_id, self.moving_jaw_geom_id}
 
         self.n_substeps  = 10    # 10 * 0.002s = 0.02s per step (50 Hz control — same as OpenAI Fetch)
         self.action_scale = 0.06

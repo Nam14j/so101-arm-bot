@@ -20,7 +20,7 @@ echo "   • Window 2 (Vision AI Model): $VISION_STEPS Steps (CNN Coordinate Reg
 echo "========================================================================"
 
 # Command for Window 1 (Arm RL)
-CMD_RL="echo -e '\033[1;33m[WINDOW 1: ROBOT ARM RL TRAINING]\033[0m'; cd '$SCRIPT_DIR' && caffeinate -dis '$PYTHON_BIN' '$SCRIPT_DIR/train_rl_ppo.py' --num_envs 8 --timesteps $RL_STEPS"
+CMD_RL="echo -e '\033[1;33m[WINDOW 1: ROBOT ARM RL TRAINING]\033[0m'; cd '$SCRIPT_DIR' && caffeinate -dis '$PYTHON_BIN' '$SCRIPT_DIR/train_rl_ppo.py' --timesteps $RL_STEPS"
 
 # Command for Window 2 (Vision AI)
 CMD_VISION="echo -e '\033[1;36m[WINDOW 2: VISION NEURAL NETWORK TRAINING]\033[0m'; cd '$SCRIPT_DIR' && caffeinate -dis '$PYTHON_BIN' '$SCRIPT_DIR/train_vision_ai.py' --steps $VISION_STEPS"

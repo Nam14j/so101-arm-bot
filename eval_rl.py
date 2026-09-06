@@ -8,7 +8,6 @@ import sys
 import time
 import argparse
 import numpy as np
-import mujoco
 import mujoco.viewer
 from stable_baselines3 import SAC, PPO
 
