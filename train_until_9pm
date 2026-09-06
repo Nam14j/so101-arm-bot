@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# ⏰ SO-101 Automated Timed Training: Trains Arm + Vision Until 9:00 PM
+# ⏰ SO-101 Automated Timed Training: Trains Arm + Vision Until a Target Time
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,20 +11,31 @@ mkdir -p "$LOG_DIR"
 TARGET_TIME_STR="${1:-21:00}" # Default: 9:00 PM
 
 NOW_EPOCH=$(date +%s)
-TARGET_EPOCH=$(date -j -f "%Y-%m-%d %H:%M" "$(date +%Y-%m-%d) $TARGET_TIME_STR" +%s 2>/dev/null)
+TODAY=$(date +%Y-%m-%d)
+TARGET_EPOCH=$(date -j -f "%Y-%m-%d %H:%M" "$TODAY $TARGET_TIME_STR" +%s 2>/dev/null)
 
-if [ -z "$TARGET_EPOCH" ] || [ "$TARGET_EPOCH" -le "$NOW_EPOCH" ]; then
-    TARGET_EPOCH=$(date -j -f "%Y-%m-%d %H:%M" "$(date +%Y-%m-%d) 21:00" +%s)
+# Invalid time format given → fall back to the 21:00 default
+if [ -z "$TARGET_EPOCH" ]; then
+    TARGET_TIME_STR="21:00"
+    TARGET_EPOCH=$(date -j -f "%Y-%m-%d %H:%M" "$TODAY $TARGET_TIME_STR" +%s)
+fi
+
+# If that time has already passed today, roll forward to tomorrow instead
+# of silently falling back to today's 21:00 (the old, buggy behavior).
+if [ "$TARGET_EPOCH" -le "$NOW_EPOCH" ]; then
+    TOMORROW=$(date -j -v+1d +%Y-%m-%d)
+    TARGET_EPOCH=$(date -j -f "%Y-%m-%d %H:%M" "$TOMORROW $TARGET_TIME_STR" +%s)
 fi
 
 DURATION_SEC=$((TARGET_EPOCH - NOW_EPOCH))
 HOURS=$((DURATION_SEC / 3600))
 MINS=$(((DURATION_SEC % 3600) / 60))
+STOP_LABEL=$(date -j -f "%s" "$TARGET_EPOCH" +'%I:%M %p on %a %b %d')
 
 echo "========================================================================"
 echo "⏰ AUTOMATED TIMED TRAINING SCHEDULED"
 echo "   • Start Time       : $(date +'%I:%M %p')"
-echo "   • Stop Time        : 09:00 PM sharp ($TARGET_TIME_STR)"
+echo "   • Stop Time        : $STOP_LABEL"
 echo "   • Total Run Time   : $HOURS hours, $MINS minutes ($DURATION_SEC seconds)"
 echo "   • Training Models  : 🦾 Arm Pick-and-Lift (RL) + 🧠 Vision AI (CNN)"
 echo "========================================================================"
@@ -52,17 +63,16 @@ osascript -e "tell application \"Terminal\" to do script \"tail -f '$LOG_DIR/tra
 echo -e "\n✅ \033[1;32mTRAINING IS ACTIVELY RUNNING!\033[0m"
 echo "   • 🦾 Arm RL Training PID    : $RL_PID (Log: outputs/logs/train_rl.log)"
 echo "   • 🧠 Vision AI Training PID  : $VISION_PID (Log: outputs/logs/train_vision.log)"
-echo "   • ⏳ Auto-Timer active: Will stop automatically at 9:00 PM sharp."
+echo "   • ⏳ Auto-Timer active: Will stop automatically at $STOP_LABEL."
 echo "========================================================================"
 
-# Background watchdog to stop at 9:00 PM
+# Background watchdog to stop at the target time
 (
     sleep "$DURATION_SEC"
-    echo -e "\n⏰ [9:00 PM REACHED] Finalizing and saving all model checkpoints..."
+    echo -e "\n⏰ [TARGET TIME REACHED] Finalizing and saving all model checkpoints..."
     kill -TERM "$RL_PID" "$VISION_PID" 2>/dev/null
     pkill -f "train_rl_ppo.py" 2>/dev/null
     pkill -f "train_vision_ai.py" 2>/dev/null
     afplay /System/Library/Sounds/Glass.aiff 2>/dev/null || true
-    echo "✅ Training session successfully completed and saved at 9:00 PM!"
+    echo "✅ Training session successfully completed and saved at $STOP_LABEL!"
 ) &
-
