@@ -19,6 +19,7 @@ import sys
 import time
 import argparse
 import warnings
+import numpy as np
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -35,27 +36,39 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "outputs", "rl_models", "so101_sac_her")
 
 
 def make_env():
-    return SO101PickEnv(reward_type="sparse")
+    return SO101PickEnv(reward_type="shaped")
 
 
 # ── Curriculum Callback ────────────────────────────────────────────────────────
 class CurriculumCallback(BaseCallback):
     """
-    Auto-advances curriculum level:
-      Level 1 (0–300k)  : Arm starts at ball — just clamp & lift
-      Level 2 (300–800k): Arm 4cm above — drop, clamp & lift
-      Level 3 (800k+)   : Full workspace from home pose
+    Auto-advances curriculum level, gated on the agent's OWN recent success
+    rate rather than a fixed step count — a run that never solves Level 1
+    stays on Level 1 instead of being pushed into a harder level it has no
+    chance of solving either (that was the bug: 0% success the whole night,
+    yet it still advanced to Level 3 at the 800k-step mark regardless).
+      Level 1 : Arm starts at ball — just clamp & lift
+      Level 2 : Arm 4cm above — drop, clamp & lift
+      Level 3 : Full workspace from home pose
     """
+    SUCCESS_THRESHOLD    = 0.30   # advance once recent success rate crosses this
+    MIN_EPISODES         = 20     # need at least this many recent episodes to judge
+    MIN_STEPS_PER_LEVEL  = 50_000 # don't even check before this many steps in a level
+    CHECK_EVERY          = 5_000
+
     def __init__(self, eval_env, verbose=1):
         super().__init__(verbose)
-        self.eval_env      = eval_env
-        self.current_level = 1
+        self.eval_env         = eval_env
+        self.current_level    = 1
+        self.level_start_step = 0
+        self.last_check_step  = 0
 
     def _on_training_start(self):
         self._set_level(1)
 
     def _set_level(self, level):
-        self.current_level = level
+        self.current_level    = level
+        self.level_start_step = self.num_timesteps
         self.training_env.env_method("set_curriculum_level", level)
         self.eval_env.env_method("set_curriculum_level", level)
         labels = {
@@ -67,12 +80,28 @@ class CurriculumCallback(BaseCallback):
         print(f"🎓 CURRICULUM: {labels[level]}")
         print("=" * 70 + "\n")
 
+    def _recent_success_rate(self):
+        buf = getattr(self.model, "ep_success_buffer", None)
+        if not buf or len(buf) < self.MIN_EPISODES:
+            return None
+        return float(np.mean(list(buf)[-self.MIN_EPISODES:]))
+
     def _on_step(self) -> bool:
-        t = self.num_timesteps
-        if self.current_level == 1 and t >= 300_000:
-            self._set_level(2)
-        elif self.current_level == 2 and t >= 800_000:
-            self._set_level(3)
+        if self.current_level >= 3:
+            return True
+        if self.num_timesteps - self.level_start_step < self.MIN_STEPS_PER_LEVEL:
+            return True
+        if self.num_timesteps - self.last_check_step < self.CHECK_EVERY:
+            return True
+        self.last_check_step = self.num_timesteps
+
+        rate = self._recent_success_rate()
+        if rate is None:
+            return True
+        if self.verbose:
+            print(f"📈 Level {self.current_level} success rate (last {self.MIN_EPISODES} eps): {rate:.0%}")
+        if rate >= self.SUCCESS_THRESHOLD:
+            self._set_level(self.current_level + 1)
         return True
 
 
@@ -131,7 +160,9 @@ def main():
         batch_size=256,
         gamma=0.98,
         tau=0.05,
-        learning_starts=500,   # Must be > max_steps (350) so HER has a full episode to sample from
+        learning_starts=5000,  # ~14 full episodes of pure random data before the critic
+                                # and entropy auto-tuner start updating (500 was <2 episodes —
+                                # too little variety before exploration started collapsing)
         policy_kwargs=dict(net_arch=[256, 256, 256]),
         device=args.device,
     )

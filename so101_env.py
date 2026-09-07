@@ -9,6 +9,9 @@ Reward equation from OpenAI FetchPickAndPlace (Plappert et al., 2018):
       d = ||achieved_goal - desired_goal||
       sparse: -(d > distance_threshold).astype(float32)   →  0 = success, -1 = fail
       dense:  -d                                           →  always negative, closer = better
+      shaped: potential-based Approach → Clamp → Lift shaping (see NOTES_FOR_AI.md
+              §5), R_t = Φ(S_t) − Φ(S_{t-1}) plus a +500 success bonus — gives partial
+              credit long before a full pick-and-lift, unlike sparse/dense above.
 
 Compatible with:
   • Stable-Baselines3 HerReplayBuffer (HER) — requires GoalEnv dict observation space
@@ -40,7 +43,7 @@ class SO101PickEnv(gym.Env):
     def __init__(self, render_mode=None, reward_type="sparse"):
         super().__init__()
         self.render_mode = render_mode
-        self.reward_type = reward_type  # "sparse" (OpenAI standard) or "dense"
+        self.reward_type = reward_type  # "sparse" (OpenAI standard), "dense", or "shaped"
 
         if not os.path.exists(XML_PATH):
             raise FileNotFoundError(f"MuJoCo XML model not found at {XML_PATH}")
@@ -125,18 +128,61 @@ class SO101PickEnv(gym.Env):
 
     def compute_reward(self, achieved_goal, desired_goal, info):
         """
-        OpenAI FetchPickAndPlace reward (Plappert et al. 2018).
         achieved_goal : ball XYZ (or batch N×3)
         desired_goal  : target XYZ (or batch N×3)
+        info          : one dict (a live env.step() call) or an array/list of
+                        dicts (stable-baselines3's HerReplayBuffer batches
+                        these when relabeling goals for HER).
         Returns:
           sparse: 0.0 if ||ag - dg|| <= threshold, else -1.0
           dense:  -||ag - dg||
+          shaped: info["shaping_reward"] (Φ(S_t) − Φ(S_{t-1}), goal-independent,
+                  precomputed in step()) plus a +500 success bonus recomputed
+                  against whichever desired_goal is passed in, so it stays
+                  correct after HER relabels the goal.
         """
         d = np.linalg.norm(achieved_goal - desired_goal, axis=-1)
         if self.reward_type == "sparse":
             return -(d > self.distance_threshold).astype(np.float32)
-        else:
+        if self.reward_type == "dense":
             return -d.astype(np.float32)
+        if self.reward_type == "shaped":
+            shaping    = self._info_field(info, "shaping_reward", 0.0)
+            is_held    = self._info_field(info, "is_held", False)
+            held_steps = self._info_field(info, "held_in_air_steps", 0)
+            success    = (d <= self.distance_threshold) & is_held & (held_steps >= 5)
+            jackpot    = np.where(success, 500.0, 0.0)
+            return (shaping + jackpot).astype(np.float32)
+        raise ValueError(f"Unknown reward_type: {self.reward_type!r}")
+
+    @staticmethod
+    def _info_field(info, key, default):
+        """Pull `key` out of `info`, whether it's a single dict (a live
+        env.step() call) or an array/list of dicts (HER's batched calls)."""
+        if isinstance(info, dict):
+            return np.asarray(info.get(key, default))
+        return np.asarray([d.get(key, default) if isinstance(d, dict) else default for d in info])
+
+    # ── Potential-based reward shaping (Approach → Clamp → Lift) ─────────────
+    # See NOTES_FOR_AI.md §5-6. Gives smooth partial credit long before a full
+    # pick-and-lift so a sparse-reward agent has something to learn from.
+
+    def _potential(self, dist_to_ball, grip_angle, is_touching, is_held, ball_ascent, hand_ascent):
+        GRIP_OPEN = 0.40   # radians — roughly the "jaws open" home angle
+        GRIP_SHUT = 0.05   # radians — roughly "jaws clamped shut"
+
+        if is_held:
+            # Stage 3 [50 → 200 pts]: genuinely gripping — reward height gained
+            ascent = float(np.clip(max(ball_ascent, 0.5 * hand_ascent), 0.0, 1.0))
+            return 50.0 + 150.0 * ascent
+        if is_touching:
+            # Stage 2 [20 → 50 pts]: jaws around the ball — reward closing the grip
+            grip_frac = float(np.clip((GRIP_OPEN - grip_angle) / (GRIP_OPEN - GRIP_SHUT), 0.0, 1.0))
+            return 20.0 + 30.0 * grip_frac
+        # Stage 1 [0 → 20 pts]: still approaching — reward closing distance with open jaws
+        approach = 1.0 - float(np.tanh(5.0 * dist_to_ball))
+        openness = float(np.clip(grip_angle / GRIP_OPEN, 0.0, 1.0))
+        return 20.0 * approach * openness
 
     # ── Observation builder ───────────────────────────────────────────────────
 
@@ -190,6 +236,17 @@ class SO101PickEnv(gym.Env):
         self.data.ctrl[:6] = start_qpos
 
         mujoco.mj_forward(self.model, self.data)
+
+        # Shaping-reward bookkeeping (potential-based reward, see step())
+        self._ball_start_z    = float(bz)
+        self._gripper_start_z = float(self._get_pinch_pos()[2])
+        self._prev_potential  = self._potential(
+            dist_to_ball=float(np.linalg.norm(self.data.xpos[self.ball_body_id] - self._get_pinch_pos())),
+            grip_angle=float(self.data.qpos[5]),
+            is_touching=self._is_contacting(),
+            is_held=False, ball_ascent=0.0, hand_ascent=0.0,
+        )
+
         return self._get_obs(), {}
 
     # ── Step ──────────────────────────────────────────────────────────────────
@@ -232,10 +289,26 @@ class SO101PickEnv(gym.Env):
         else:
             self.held_in_air_steps = 0
 
+        # ── Potential-based shaping (used only when reward_type == "shaped") ──
+        ball_ascent = max(0.0, ball_z - self._ball_start_z)
+        hand_ascent = max(0.0, float(gripper_pos[2]) - self._gripper_start_z)
+        current_potential    = self._potential(dist_to_ball, grip_angle, is_touching,
+                                                is_held, ball_ascent, hand_ascent)
+        shaping_reward        = current_potential - self._prev_potential
+        self._prev_potential  = current_potential
+
         # ── OpenAI-compatible reward ──────────────────────────────────────────
         achieved_goal = ball_pos
         desired_goal  = self._goal
-        reward        = float(self.compute_reward(achieved_goal, desired_goal, {}))
+        info = {
+            "dist":              dist_to_ball,
+            "ball_z":            ball_z,
+            "is_touching":       is_touching,
+            "shaping_reward":    shaping_reward,
+            "is_held":           is_held,
+            "held_in_air_steps": self.held_in_air_steps,
+        }
+        reward = float(self.compute_reward(achieved_goal, desired_goal, info))
 
         # Success: ball within distance_threshold of goal (>=10cm up) AND genuinely held
         success    = bool(
@@ -246,14 +319,9 @@ class SO101PickEnv(gym.Env):
         terminated = success
         truncated  = bool(self.current_step >= self.max_steps)
 
-        obs  = self._get_obs()
-        info = {
-            "dist":          dist_to_ball,
-            "ball_z":        ball_z,
-            "is_touching":   is_touching,
-            "success":       success,
-            "is_success":    success,   # SB3 HER reads "is_success" key
-        }
+        obs = self._get_obs()
+        info["success"]    = success
+        info["is_success"] = success   # SB3 HER reads "is_success" key
 
         return obs, reward, terminated, truncated, info
 
