@@ -167,3 +167,37 @@ The standard architecture introduced by OpenAI for robot manipulation (like the 
 
 
 
+
+
+---
+
+## 10. 📖 Quick Vocab Glossary (For Reading the Training Logs)
+
+A cheat-sheet for the terms that show up live in `train_rl.log` and in conversation, explained plain and simple.
+
+### The Basics
+* **Episode**: One full attempt at the task, start to finish (try to pick up the ball, then it ends in success or failure). A new episode starts right after.
+* **Timestep**: One single tiny action inside an episode (one small motor move). An episode = many timesteps. `total_timesteps` in the log = the running count of every action ever taken, across all episodes.
+* **Policy**: Just means "the robot's current strategy/brain." It's the thing actually being trained.
+* **Success rate**: Out of the episodes just tried, what % ended in a real, full success. This is the number that matters most — everything else is secondary to it.
+* **Exploration vs. Exploitation**: Exploration = trying new/random stuff to discover things. Exploitation = doing what it already knows works. Every RL system is constantly balancing these two.
+
+### SAC-Specific Terms
+* **`ent_coef` (Entropy Coefficient)**: The "randomness dial." Controls how much the robot rewards itself just for staying unpredictable/curious instead of always doing what it thinks is best. Starts high early in training (lots of exploring) and automatically shrinks toward ~0 as training goes on (less exploring, more confident/repeating what works).
+* **`ent_coef_loss`**: Internal bookkeeping for the automatic system that adjusts `ent_coef` above — like a thermostat's own error reading. Not a measure of the robot's actual performance; safe to ignore day-to-day.
+* **`learning_rate`**: How big a step the robot takes each time it updates its brain based on something it just learned. Small = careful, slow, steady changes (0.001 is a fairly cautious, standard setting). Big = fast but can overshoot/be unstable.
+* **`n_updates`**: A simple odometer — counts how many times the robot has updated its brain by replaying a batch of memories. Goes up and up; separate from `total_timesteps` (which counts physical actions, not brain-updates).
+* **`fps` (in the log)**: NOT video frame rate — means simulation steps per second, i.e. how fast training is currently running.
+* **Replay buffer**: A memory bank of past attempts (good and bad) the robot re-studies over and over instead of only learning from what just happened. This is the "buffer" HER edits/relabels entries in.
+* **Off-policy**: A technical detail meaning SAC is allowed to learn from OLD memories sitting in the replay buffer, not just its most recent attempt. It's why the replay buffer trick works at all.
+* **Actor / actor_loss**: The Actor is the part of the brain that decides what action to take. `actor_loss` tracks how much its move-picking is still being corrected — don't expect it to fall in a clean smooth line, RL losses bounce around a lot.
+* **Critic / critic_loss**: The Critic is the part that judges "how good was that action, really?" — like a coach grading the Actor's choices. `critic_loss` tracks how far off its grading still is.
+
+### Reward-Shaping Terms
+* **Sparse reward vs. Shaped reward**: Sparse = only a reward at the very end, for full success (this is what was broken in the first overnight run). Shaped = small rewards along the way for getting closer step by step (approach → clamp → lift), which is what we fixed it to use.
+* **`desired_goal` / `achieved_goal`**: How the code labels goals for HER. `desired_goal` = where the ball is actually supposed to end up. `achieved_goal` = where it actually ended up. HER's trick works by swapping in `achieved_goal` as a pretend `desired_goal` after a failed attempt, so there's still something to learn from.
+
+### Project-Management Terms
+* **Curriculum (learning)**: The leveled lesson plan (Easy → Medium → Hard). Fixed to advance based on the robot actually hitting a real success rate at its current level, instead of advancing on a blind timer.
+* **Checkpoint**: A saved snapshot of the robot's brain at some point in training (e.g. `so101_sac_her_350000_steps.zip`) — lets you go back and compare/use an earlier version instead of only ever the latest.
+* **Evaluation ("eval")**: A special test run where the robot isn't learning, just being graded — produces the clean success-rate/reward numbers (`evaluations.npz`), separate from the noisier numbers seen during regular training.
