@@ -181,12 +181,69 @@ class GraspDiagnosticsCallback(BaseCallback):
         return True
 
 
+# ── Early-Stop Callback ──────────────────────────────────────────────────────────
+class EarlyStopCallback(BaseCallback):
+    """
+    Added 2026-09-08. Stops training early once EITHER condition is hit:
+      - recent success rate crosses `success_threshold`
+      - wall-clock time since training started passes `time_limit_seconds`
+    Whichever comes first. Either can be left as None to disable that check.
+    A callback returning False just ends model.learn() normally (no
+    exception), so the existing save-final-model code still runs.
+    """
+    MIN_EPISODES = 20   # need at least this many recent episodes to judge success rate
+    CHECK_EVERY  = 2_000
+
+    def __init__(self, success_threshold=None, time_limit_seconds=None, verbose=1):
+        super().__init__(verbose)
+        self.success_threshold  = success_threshold
+        self.time_limit_seconds = time_limit_seconds
+        self.start_time         = None
+        self.last_check_step    = 0
+
+    def _on_training_start(self):
+        self.start_time = time.time()
+
+    def _recent_success_rate(self):
+        buf = getattr(self.model, "ep_success_buffer", None)
+        if not buf or len(buf) < self.MIN_EPISODES:
+            return None
+        return float(np.mean(list(buf)[-self.MIN_EPISODES:]))
+
+    def _on_step(self) -> bool:
+        if self.time_limit_seconds is not None:
+            elapsed = time.time() - self.start_time
+            if elapsed >= self.time_limit_seconds:
+                print(f"\n⏰ Time limit reached ({elapsed/60:.1f} min) — stopping training.")
+                return False
+
+        if self.success_threshold is not None:
+            if self.num_timesteps - self.last_check_step >= self.CHECK_EVERY:
+                self.last_check_step = self.num_timesteps
+                rate = self._recent_success_rate()
+                if rate is not None:
+                    if self.verbose:
+                        print(f"🎯 Recent success rate (last {self.MIN_EPISODES} eps): {rate:.0%} "
+                              f"(stop target: {self.success_threshold:.0%})")
+                    if rate >= self.success_threshold:
+                        print(f"\n✅ Success rate {rate:.0%} crossed target {self.success_threshold:.0%} — stopping training.")
+                        return False
+        return True
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--timesteps", type=int,   default=2_000_000)
     parser.add_argument("--lr",        type=float, default=1e-3)
     parser.add_argument("--device",    type=str,   default="auto")
+    parser.add_argument("--lock_level",     type=int,   default=None,
+                         help="Pin curriculum to this level for the whole run (1/2/3) "
+                              "instead of auto-advancing.")
+    parser.add_argument("--success_stop",   type=float, default=None,
+                         help="Stop early once recent success rate (last 20 eps) reaches this (e.g. 0.10 = 10%%).")
+    parser.add_argument("--time_limit_min", type=float, default=None,
+                         help="Stop early after this many minutes of wall-clock training time, regardless of success rate.")
     args = parser.parse_args()
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -203,8 +260,25 @@ def main():
     env      = DummyVecEnv([make_env])
     eval_env = DummyVecEnv([make_env])
 
-    curriculum_cb  = CurriculumCallback(eval_env=eval_env)
+    callbacks = []
+    if args.lock_level is not None:
+        env.env_method("set_curriculum_level", args.lock_level)
+        eval_env.env_method("set_curriculum_level", args.lock_level)
+        print(f"🔒 Curriculum locked to Level {args.lock_level} — will NOT auto-advance this run.")
+    else:
+        callbacks.append(CurriculumCallback(eval_env=eval_env))
+
     diagnostics_cb = GraspDiagnosticsCallback()
+    callbacks.append(diagnostics_cb)
+
+    if args.success_stop is not None or args.time_limit_min is not None:
+        time_limit_seconds = args.time_limit_min * 60 if args.time_limit_min is not None else None
+        callbacks.append(EarlyStopCallback(success_threshold=args.success_stop,
+                                            time_limit_seconds=time_limit_seconds))
+        if args.success_stop is not None:
+            print(f"🎯 Will stop early once success rate reaches {args.success_stop:.0%}.")
+        if args.time_limit_min is not None:
+            print(f"⏰ Will stop early after {args.time_limit_min:.0f} minutes regardless.")
 
     eval_cb = EvalCallback(
         eval_env,
@@ -249,7 +323,7 @@ def main():
     try:
         model.learn(
             total_timesteps=args.timesteps,
-            callback=[curriculum_cb, diagnostics_cb, eval_cb, checkpoint_cb],
+            callback=callbacks + [eval_cb, checkpoint_cb],
             progress_bar=True,
         )
     except KeyboardInterrupt:
