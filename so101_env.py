@@ -43,6 +43,10 @@ TARGET_Z = 0.10
 STABLE_HOLD_STEPS  = 15     # ~0.3s of unbroken, genuine hold while lifted
 STABLE_LIFT_HEIGHT = 0.06   # ball must be at least 6cm off the table (started at ~2.4cm)
 STABLE_GRASP_BONUS = 300.0
+# Ball must move together with the gripper (not its own separate flight path) for
+# every one of those steps — this is what actually rules out "flick it up and let
+# it coast/bounce through the both-pads-touching check" instead of really carrying it.
+STABLE_MAX_REL_SPEED = 0.25  # m/s, ball velocity relative to gripper velocity
 
 class SO101PickEnv(gym.Env):
     """
@@ -220,6 +224,8 @@ class SO101PickEnv(gym.Env):
         self.current_step      = 0
         self.held_in_air_steps = 0
         self._stable_bonus_given = False   # resets each episode
+        self._stable_grip_steps  = 0
+        self._prev_pinch_pos     = self._get_pinch_pos().copy()
 
         # Randomize ball position on desk
         bx = self.np_random.uniform(0.18, 0.23)
@@ -305,11 +311,24 @@ class SO101PickEnv(gym.Env):
             self.held_in_air_steps = 0
 
         # Big one-time bonus: genuinely grasped + lifted + held steady, no slipping.
+        # "Genuinely carried" requires the ball's velocity to match the gripper's —
+        # a flicked/tossed ball has its own free-flight velocity, so this breaks the
+        # streak immediately even if it briefly touches both pads while airborne.
+        dt          = self.n_substeps * self.model.opt.timestep
+        gripper_vel = (gripper_pos - self._prev_pinch_pos) / dt
+        ball_vel    = self.data.qvel[self.ball_dof_adr:self.ball_dof_adr + 3]
+        rel_speed   = float(np.linalg.norm(ball_vel - gripper_vel))
+        self._prev_pinch_pos = gripper_pos.copy()
+
+        genuinely_carried = (is_held and ball_z >= STABLE_LIFT_HEIGHT
+                              and rel_speed <= STABLE_MAX_REL_SPEED)
+        if genuinely_carried:
+            self._stable_grip_steps += 1
+        else:
+            self._stable_grip_steps = 0
+
         stable_grasp_bonus = 0.0
-        if (not self._stable_bonus_given
-                and is_held
-                and ball_z >= STABLE_LIFT_HEIGHT
-                and self.held_in_air_steps >= STABLE_HOLD_STEPS):
+        if not self._stable_bonus_given and self._stable_grip_steps >= STABLE_HOLD_STEPS:
             stable_grasp_bonus = STABLE_GRASP_BONUS
             self._stable_bonus_given = True
 
