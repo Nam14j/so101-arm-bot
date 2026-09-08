@@ -150,7 +150,7 @@ class SO101PickEnv(gym.Env):
             shaping    = self._info_field(info, "shaping_reward", 0.0)
             is_held    = self._info_field(info, "is_held", False)
             held_steps = self._info_field(info, "held_in_air_steps", 0)
-            success    = (d <= self.distance_threshold) & is_held & (held_steps >= 5)
+            success    = (d <= self.distance_threshold) & is_held & (held_steps >= 3)
             jackpot    = np.where(success, 500.0, 0.0)
             return (shaping + jackpot).astype(np.float32)
         raise ValueError(f"Unknown reward_type: {self.reward_type!r}")
@@ -283,7 +283,10 @@ class SO101PickEnv(gym.Env):
         grip_angle   = float(self.data.qpos[5])
 
         # Sustained hold tracking (anti-flick: both pads + clamped + airborne)
-        is_held = bool(is_touching and dist_to_ball <= 0.045 and grip_angle < 0.20)
+        # Loosened 2026-09-08: was dist<=0.045 / grip<0.20 — too strict a
+        # simultaneous window given how long training was stuck at 0% even
+        # on curriculum Level 1. See NOTES_FOR_AI.md changelog.
+        is_held = bool(is_touching and dist_to_ball <= 0.06 and grip_angle < 0.28)
         if is_held and ball_z > 0.040:
             self.held_in_air_steps += 1
         else:
@@ -307,6 +310,7 @@ class SO101PickEnv(gym.Env):
             "shaping_reward":    shaping_reward,
             "is_held":           is_held,
             "held_in_air_steps": self.held_in_air_steps,
+            "grip_angle":        grip_angle,
         }
         reward = float(self.compute_reward(achieved_goal, desired_goal, info))
 
@@ -314,7 +318,7 @@ class SO101PickEnv(gym.Env):
         success    = bool(
             np.linalg.norm(achieved_goal - desired_goal) <= self.distance_threshold
             and is_held
-            and self.held_in_air_steps >= 5
+            and self.held_in_air_steps >= 3
         )
         terminated = success
         truncated  = bool(self.current_step >= self.max_steps)

@@ -19,6 +19,7 @@ import sys
 import time
 import argparse
 import warnings
+from collections import deque
 import numpy as np
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -105,6 +106,81 @@ class CurriculumCallback(BaseCallback):
         return True
 
 
+# ── Grasp Diagnostics Callback ──────────────────────────────────────────────────
+class GraspDiagnosticsCallback(BaseCallback):
+    """
+    Added 2026-09-08 to answer "how close is it actually getting?" once
+    success stayed at 0% well past 1M steps on curriculum Level 1.
+
+    Doesn't change training at all — just watches info["is_touching"],
+    info["dist"], info["grip_angle"], and info["is_held"] every step and
+    prints a periodic summary, so we can tell "never even touches the ball"
+    apart from "touches it but the grip/distance is a little off" apart from
+    "genuinely satisfies the hold gate sometimes, just not long/high enough."
+    """
+    CHECK_EVERY = 5_000
+    WINDOW      = 20  # episodes
+
+    def __init__(self, verbose=1):
+        super().__init__(verbose)
+        self.last_check_step = 0
+        self.touched_ever  = deque(maxlen=self.WINDOW)
+        self.held_ever     = deque(maxlen=self.WINDOW)
+        self.best_dist     = deque(maxlen=self.WINDOW)   # closest approach all episode
+        self.best_grip     = deque(maxlen=self.WINDOW)   # tightest grip seen WHILE touching
+        self._ep = None  # per-vec-env running trackers, set on training start
+
+    def _on_training_start(self):
+        n = self.training_env.num_envs
+        self._ep = [self._fresh_ep() for _ in range(n)]
+
+    @staticmethod
+    def _fresh_ep():
+        return {"touched": False, "held": False, "min_dist": float("inf"), "min_grip_touching": float("inf")}
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        dones = self.locals.get("dones", [])
+        for i, info in enumerate(infos):
+            e = self._ep[i]
+            d = info.get("dist")
+            if d is not None:
+                e["min_dist"] = min(e["min_dist"], float(d))
+            if info.get("is_touching"):
+                e["touched"] = True
+                g = info.get("grip_angle")
+                if g is not None:
+                    e["min_grip_touching"] = min(e["min_grip_touching"], float(g))
+            if info.get("is_held"):
+                e["held"] = True
+            if i < len(dones) and dones[i]:
+                self.touched_ever.append(e["touched"])
+                self.held_ever.append(e["held"])
+                self.best_dist.append(e["min_dist"])
+                self.best_grip.append(e["min_grip_touching"])
+                self._ep[i] = self._fresh_ep()
+
+        if (self.num_timesteps - self.last_check_step >= self.CHECK_EVERY
+                and len(self.touched_ever) >= 5):
+            self.last_check_step = self.num_timesteps
+            n = len(self.touched_ever)
+            touch_pct = 100.0 * sum(self.touched_ever) / n
+            held_pct  = 100.0 * sum(self.held_ever) / n
+            finite_dist = [x for x in self.best_dist if x != float("inf")]
+            finite_grip = [x for x in self.best_grip if x != float("inf")]
+            best_dist = min(finite_dist) if finite_dist else float("nan")
+            best_grip = min(finite_grip) if finite_grip else float("nan")
+            if self.verbose:
+                print(
+                    f"🔍 Grasp diagnostics (last {n} eps): "
+                    f"touched ball {touch_pct:.0f}% of episodes | "
+                    f"fully satisfied grip+dist gate {held_pct:.0f}% of episodes | "
+                    f"closest approach ever={best_dist:.3f}m | "
+                    f"tightest grip while touching={best_grip:.3f}rad (gate needs <0.28)"
+                )
+        return True
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser()
@@ -127,7 +203,8 @@ def main():
     env      = DummyVecEnv([make_env])
     eval_env = DummyVecEnv([make_env])
 
-    curriculum_cb = CurriculumCallback(eval_env=eval_env)
+    curriculum_cb  = CurriculumCallback(eval_env=eval_env)
+    diagnostics_cb = GraspDiagnosticsCallback()
 
     eval_cb = EvalCallback(
         eval_env,
@@ -172,7 +249,7 @@ def main():
     try:
         model.learn(
             total_timesteps=args.timesteps,
-            callback=[curriculum_cb, eval_cb, checkpoint_cb],
+            callback=[curriculum_cb, diagnostics_cb, eval_cb, checkpoint_cb],
             progress_bar=True,
         )
     except KeyboardInterrupt:
