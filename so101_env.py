@@ -2,19 +2,49 @@
 """
 so101_env.py — Gymnasium GoalEnv for SO-101 Ball Picker in MuJoCo.
 
-Reward equation from OpenAI FetchPickAndPlace (Plappert et al., 2018):
-  https://github.com/Farama-Foundation/Gymnasium-Robotics/blob/main/gymnasium_robotics/envs/fetch/fetch_env.py
+Reward: "V11" staged reward, adapted from ggando's published SO-101 MuJoCo/SAC
+grasp-and-lift agent (https://ggando.com/blog/so101-rl-lift/, code at
+https://github.com/ggand0/pick-101), which reported 100% success rate with
+this structure. Per-step sum of terms (NOT a potential-based delta like the
+old OpenAI-Fetch-style shaping this replaces):
 
-  compute_reward(achieved_goal, desired_goal, info):
-      d = ||achieved_goal - desired_goal||
-      sparse: -(d > distance_threshold).astype(float32)   →  0 = success, -1 = fail
-      dense:  -d                                           →  always negative, closer = better
-      shaped: potential-based Approach → Clamp → Lift shaping (see NOTES_FOR_AI.md
-              §5), R_t = Φ(S_t) − Φ(S_{t-1}) plus a +500 success bonus — gives partial
-              credit long before a full pick-and-lift, unlike sparse/dense above.
+  Component            Condition          Value
+  --------------------------------------------------------------------------
+  Reach                always             1.0 - tanh(10 * dist_to_ball)
+  Push-down penalty    ball_z < 0.010     -(0.010 - ball_z) * 50
+  Drop penalty         lost grasp*        -2.0
+  Grasp bonus          grasping**         +0.25
+  Continuous lift      grasping**         lift_progress * 2.0
+  Binary lift          ball_z > 0.040     +1.0
+  Target bonus         ball_z > TARGET_Z  +1.0
+  Action penalty       ball_z > 0.060     -0.01 * ||action - prev_action||^2
+  Success              held at target***  +10.0
+
+  *   "lost grasp" = was touching AND lifted last step, not touching this step.
+  **  "grasping" = both jaw pads touching the ball simultaneously (is_touching).
+  *** "held at target" = grasping AND ball_z > TARGET_Z, sustained for a few
+      consecutive steps (see SUCCESS_HOLD_STEPS) so a single noisy frame can't
+      end an episode.
+
+Two height thresholds were rescaled from the blog's original numbers (0.02
+binary-lift / 0.08 target) to fit THIS env's ball, which rests at ~0.024m
+instead of their cube's lower resting height — see BINARY_LIFT_Z / TARGET_Z
+below. The push-down threshold (0.010) and action-penalty threshold (0.060)
+were kept as published since they're near-table / near-target checks that
+don't depend much on the object's exact resting height.
+
+Also keeps the STABLE_GRASP_BONUS anti-flick check added 2026-09-08 (ball
+must move WITH the gripper, not on its own separate flight path, for the
+hold to count) — that's this project's own addition on top of V11, not part
+of the original blog post.
 
 Compatible with:
-  • Stable-Baselines3 HerReplayBuffer (HER) — requires GoalEnv dict observation space
+  • Stable-Baselines3 HerReplayBuffer (HER) — requires GoalEnv dict observation space.
+    NOTE: V11 doesn't depend on desired_goal (it's a fixed-height staged reward,
+    not a goal-distance reward), so HER's goal-relabeling trick isn't doing
+    useful work under V11 the way it did under the old goal-distance shaping.
+    The Dict observation / achieved_goal / desired_goal / compute_reward
+    interface is kept as-is so the existing training script needs no changes.
   • EvalCallback, CheckpointCallback
   • Curriculum level control via set_curriculum_level(1/2/3)
 """
@@ -28,37 +58,49 @@ import mujoco
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 XML_PATH = os.path.join(BASE_DIR, "so101_mujoco.xml")
 
-# Distance threshold from OpenAI FetchPickAndPlace: 5cm (achievable with a 48mm foam ball)
-DISTANCE_THRESHOLD = 0.05
-# Target lift height: ball must reach 10cm above table to count as "picked up"
-TARGET_Z = 0.10
+# ── V11 reward constants (see module docstring table) ───────────────────────
+PUSH_DOWN_Z      = 0.010   # published as-is: near/through-the-table check
+BINARY_LIFT_Z    = 0.040   # rescaled from blog's 0.02 — this ball rests at ~0.024,
+                            # so 0.02 would fire even at rest; 0.04 is genuinely lifted
+ACTION_PENALTY_Z = 0.060   # published as-is
+TARGET_Z         = 0.080   # rescaled from blog's 0.08 target — kept the same number,
+                            # it already sits sensibly above this env's resting height
+REACH_TANH_SCALE      = 10.0
+PUSH_DOWN_COEF        = 50.0
+DROP_PENALTY          = -2.0
+GRASP_BONUS            = 0.25
+CONTINUOUS_LIFT_COEF  = 2.0
+BINARY_LIFT_BONUS     = 1.0
+TARGET_BONUS          = 1.0
+ACTION_PENALTY_COEF   = 0.01
+SUCCESS_BONUS         = 10.0
+SUCCESS_HOLD_STEPS    = 3   # consecutive steps "held at target" must hold before it counts
 
-# Added 2026-09-08: a big one-time bonus the instant it genuinely grasps the
-# ball (both pads, gripper closed, close enough) AND lifts it AND holds it
-# there continuously without dropping it, even before it necessarily reaches
-# the exact goal height/position. This is deliberately easier to reach than
-# full "success" (which also needs the precise goal position) so the agent
-# gets a big, clear signal for the core skill — grasp + lift + don't slip —
-# on its own.
-STABLE_HOLD_STEPS  = 15     # ~0.3s of unbroken, genuine hold while lifted
-STABLE_LIFT_HEIGHT = 0.06   # ball must be at least 6cm off the table (started at ~2.4cm)
-STABLE_GRASP_BONUS = 300.0
-# Ball must move together with the gripper (not its own separate flight path) for
-# every one of those steps — this is what actually rules out "flick it up and let
-# it coast/bounce through the both-pads-touching check" instead of really carrying it.
-STABLE_MAX_REL_SPEED = 0.25  # m/s, ball velocity relative to gripper velocity
+# Added 2026-09-08, kept on top of V11: a big one-time bonus the instant it
+# genuinely grasps the ball AND lifts it AND holds it there continuously
+# without dropping it, moving together with the gripper (not flicked/tossed).
+STABLE_HOLD_STEPS    = 15     # ~0.3s of unbroken, genuine hold while lifted
+STABLE_LIFT_HEIGHT   = 0.06   # ball must be at least 6cm off the table
+STABLE_GRASP_BONUS   = 300.0
+STABLE_MAX_REL_SPEED = 0.25   # m/s, ball velocity relative to gripper velocity
+
 
 class SO101PickEnv(gym.Env):
     """
     Gymnasium GoalEnv for SO-101 robot arm picking an orange foam ball.
-    Reward is OpenAI-compatible sparse or dense, ready for HER training.
+    Reward is the V11 staged reward (see module docstring) — reward_type is
+    kept as a constructor arg for interface compatibility but only "v11" is
+    implemented now; "sparse"/"dense"/"shaped" (the old OpenAI-Fetch-style
+    reward) have been removed.
     """
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 50}
 
-    def __init__(self, render_mode=None, reward_type="sparse"):
+    def __init__(self, render_mode=None, reward_type="v11"):
         super().__init__()
         self.render_mode = render_mode
-        self.reward_type = reward_type  # "sparse" (OpenAI standard), "dense", or "shaped"
+        if reward_type != "v11":
+            raise ValueError(f"Only reward_type='v11' is supported now (got {reward_type!r}).")
+        self.reward_type = reward_type
 
         if not os.path.exists(XML_PATH):
             raise FileNotFoundError(f"MuJoCo XML model not found at {XML_PATH}")
@@ -74,18 +116,12 @@ class SO101PickEnv(gym.Env):
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(6,), dtype=np.float32)
 
         # ── GoalEnv Dict Observation (required for HER compatibility) ──────────
-        # Matches OpenAI FetchPickAndPlace structure:
-        #   "observation"    : robot state (joint pos, joint vel, gripper pos, ball pos, rel vector)
-        #   "achieved_goal"  : current ball XYZ position
-        #   "desired_goal"   : target XYZ position (ball lifted to TARGET_Z)
         obs_dim = 21  # 6 qpos + 6 qvel + 3 gripper_pos + 3 ball_pos + 3 rel_vec
         self.observation_space = spaces.Dict({
             "observation":   spaces.Box(-10.0, 10.0, shape=(obs_dim,), dtype=np.float32),
             "achieved_goal": spaces.Box(-10.0, 10.0, shape=(3,),      dtype=np.float32),
             "desired_goal":  spaces.Box(-10.0, 10.0, shape=(3,),      dtype=np.float32),
         })
-
-        self.distance_threshold = DISTANCE_THRESHOLD
 
         # Body / Geom IDs
         self.gripper_body_id  = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "moving_jaw_so101_v1_link")
@@ -108,7 +144,9 @@ class SO101PickEnv(gym.Env):
         self.home_rad = np.deg2rad(np.array([0.0, -50.0, 50.0, 60.0, 0.0, 25.0], dtype=np.float32))
         self.curriculum_level = 3
 
-        # Goal (set during reset)
+        # Goal (set during reset) — kept for GoalEnv/HER interface compatibility.
+        # V11's reward doesn't use this (it's a fixed-height staged reward, not
+        # a goal-distance reward), but the Dict obs space still needs the key.
         self._goal = np.zeros(3, dtype=np.float32)
 
     # ── Curriculum helpers ────────────────────────────────────────────────────
@@ -124,7 +162,8 @@ class SO101PickEnv(gym.Env):
                 self.data.geom_xpos[self.moving_jaw_geom_id]) / 2.0
 
     def _is_contacting(self):
-        """True only if BOTH inner rubber jaw pads touch the ball simultaneously."""
+        """True only if BOTH inner rubber jaw pads touch the ball simultaneously.
+        This is what V11's "grasping" condition maps to in this env."""
         fixed_touch  = False
         moving_touch = False
         for i in range(self.data.ncon):
@@ -138,37 +177,13 @@ class SO101PickEnv(gym.Env):
                     moving_touch = True
         return fixed_touch and moving_touch   # BOTH pads must touch simultaneously
 
-    # ── OpenAI-compatible compute_reward ─────────────────────────────────────
-    # Exact signature from gymnasium_robotics/envs/fetch/fetch_env.py
+    # ── GoalEnv-compatible compute_reward ────────────────────────────────────
+    # Signature required by SB3's HerReplayBuffer. V11's value is precomputed,
+    # goal-independent, in step() and just passed through info — it doesn't
+    # actually depend on achieved_goal/desired_goal (see module docstring).
 
     def compute_reward(self, achieved_goal, desired_goal, info):
-        """
-        achieved_goal : ball XYZ (or batch N×3)
-        desired_goal  : target XYZ (or batch N×3)
-        info          : one dict (a live env.step() call) or an array/list of
-                        dicts (stable-baselines3's HerReplayBuffer batches
-                        these when relabeling goals for HER).
-        Returns:
-          sparse: 0.0 if ||ag - dg|| <= threshold, else -1.0
-          dense:  -||ag - dg||
-          shaped: info["shaping_reward"] (Φ(S_t) − Φ(S_{t-1}), goal-independent,
-                  precomputed in step()) plus a +500 success bonus recomputed
-                  against whichever desired_goal is passed in, so it stays
-                  correct after HER relabels the goal.
-        """
-        d = np.linalg.norm(achieved_goal - desired_goal, axis=-1)
-        if self.reward_type == "sparse":
-            return -(d > self.distance_threshold).astype(np.float32)
-        if self.reward_type == "dense":
-            return -d.astype(np.float32)
-        if self.reward_type == "shaped":
-            shaping    = self._info_field(info, "shaping_reward", 0.0)
-            is_held    = self._info_field(info, "is_held", False)
-            held_steps = self._info_field(info, "held_in_air_steps", 0)
-            success    = (d <= self.distance_threshold) & is_held & (held_steps >= 3)
-            jackpot    = np.where(success, 500.0, 0.0)
-            return (shaping + jackpot).astype(np.float32)
-        raise ValueError(f"Unknown reward_type: {self.reward_type!r}")
+        return self._info_field(info, "v11_reward", 0.0).astype(np.float32)
 
     @staticmethod
     def _info_field(info, key, default):
@@ -177,27 +192,6 @@ class SO101PickEnv(gym.Env):
         if isinstance(info, dict):
             return np.asarray(info.get(key, default))
         return np.asarray([d.get(key, default) if isinstance(d, dict) else default for d in info])
-
-    # ── Potential-based reward shaping (Approach → Clamp → Lift) ─────────────
-    # See NOTES_FOR_AI.md §5-6. Gives smooth partial credit long before a full
-    # pick-and-lift so a sparse-reward agent has something to learn from.
-
-    def _potential(self, dist_to_ball, grip_angle, is_touching, is_held, ball_ascent, hand_ascent):
-        GRIP_OPEN = 0.40   # radians — roughly the "jaws open" home angle
-        GRIP_SHUT = 0.05   # radians — roughly "jaws clamped shut"
-
-        if is_held:
-            # Stage 3 [50 → 200 pts]: genuinely gripping — reward height gained
-            ascent = float(np.clip(max(ball_ascent, 0.5 * hand_ascent), 0.0, 1.0))
-            return 50.0 + 150.0 * ascent
-        if is_touching:
-            # Stage 2 [20 → 50 pts]: jaws around the ball — reward closing the grip
-            grip_frac = float(np.clip((GRIP_OPEN - grip_angle) / (GRIP_OPEN - GRIP_SHUT), 0.0, 1.0))
-            return 20.0 + 30.0 * grip_frac
-        # Stage 1 [0 → 20 pts]: still approaching — reward closing distance with open jaws
-        approach = 1.0 - float(np.tanh(5.0 * dist_to_ball))
-        openness = float(np.clip(grip_angle / GRIP_OPEN, 0.0, 1.0))
-        return 20.0 * approach * openness
 
     # ── Observation builder ───────────────────────────────────────────────────
 
@@ -214,7 +208,7 @@ class SO101PickEnv(gym.Env):
         return {
             "observation":   obs_vec,
             "achieved_goal": ball_pos.copy(),       # current ball XYZ
-            "desired_goal":  self._goal.copy(),     # target lift XYZ
+            "desired_goal":  self._goal.copy(),     # kept for interface compatibility (unused by V11)
         }
 
     # ── Reset ─────────────────────────────────────────────────────────────────
@@ -226,6 +220,9 @@ class SO101PickEnv(gym.Env):
         self._stable_bonus_given = False   # resets each episode
         self._stable_grip_steps  = 0
         self._prev_pinch_pos     = self._get_pinch_pos().copy()
+        self._prev_action        = np.zeros(6, dtype=np.float32)
+        self._was_touching_lifted = False
+        self._success_hold_steps  = 0
 
         # Randomize ball position on desk
         bx = self.np_random.uniform(0.18, 0.23)
@@ -236,7 +233,7 @@ class SO101PickEnv(gym.Env):
         self.data.qpos[self.ball_qpos_adr     : self.ball_qpos_adr + 3] = [bx, by, bz]
         self.data.qpos[self.ball_qpos_adr + 3 : self.ball_qpos_adr + 7] = [1.0, 0.0, 0.0, 0.0]
 
-        # Goal: ball lifted TARGET_Z above table, same XY as ball (straight up)
+        # Goal: kept for GoalEnv/HER interface compatibility (see class docstring)
         self._goal = np.array([bx, by, TARGET_Z], dtype=np.float32)
 
         # Curriculum arm spawn pose
@@ -255,15 +252,8 @@ class SO101PickEnv(gym.Env):
 
         mujoco.mj_forward(self.model, self.data)
 
-        # Shaping-reward bookkeeping (potential-based reward, see step())
         self._ball_start_z    = float(bz)
         self._gripper_start_z = float(self._get_pinch_pos()[2])
-        self._prev_potential  = self._potential(
-            dist_to_ball=float(np.linalg.norm(self.data.xpos[self.ball_body_id] - self._get_pinch_pos())),
-            grip_angle=float(self.data.qpos[5]),
-            is_touching=self._is_contacting(),
-            is_held=False, ball_ascent=0.0, hand_ascent=0.0,
-        )
 
         return self._get_obs(), {}
 
@@ -271,7 +261,7 @@ class SO101PickEnv(gym.Env):
 
     def step(self, action):
         self.current_step += 1
-        action = np.clip(action, -1.0, 1.0)
+        action = np.clip(action, -1.0, 1.0).astype(np.float32)
 
         # Floor safety: prevent pushing arm into table
         if self._get_pinch_pos()[2] < 0.025:
@@ -293,27 +283,43 @@ class SO101PickEnv(gym.Env):
             if np.linalg.norm(self.data.qvel[self.ball_dof_adr:self.ball_dof_adr+3]) < 0.05:
                 self.data.qvel[self.ball_dof_adr:self.ball_dof_adr+6] = 0.0
 
-        is_touching  = self._is_contacting()
+        is_touching  = self._is_contacting()   # V11's "grasping" signal
         gripper_pos  = self._get_pinch_pos()
         ball_pos     = self.data.xpos[self.ball_body_id].copy().astype(np.float32)
         dist_to_ball = float(np.linalg.norm(ball_pos - gripper_pos))
         ball_z       = float(ball_pos[2])
         grip_angle   = float(self.data.qpos[5])
 
-        # Sustained hold tracking (anti-flick: both pads + clamped + airborne)
-        # Loosened 2026-09-08: was dist<=0.045 / grip<0.20 — too strict a
-        # simultaneous window given how long training was stuck at 0% even
-        # on curriculum Level 1. See NOTES_FOR_AI.md changelog.
+        # ── V11 staged reward (see module docstring table) ─────────────────────
+        reach_term       = 1.0 - float(np.tanh(REACH_TANH_SCALE * dist_to_ball))
+        push_down_term    = -(PUSH_DOWN_Z - ball_z) * PUSH_DOWN_COEF if ball_z < PUSH_DOWN_Z else 0.0
+        lifted_now         = is_touching and ball_z > BINARY_LIFT_Z
+        drop_term          = DROP_PENALTY if (self._was_touching_lifted and not lifted_now) else 0.0
+        grasp_term         = GRASP_BONUS if is_touching else 0.0
+        lift_progress      = float(np.clip((ball_z - self._ball_start_z) / (TARGET_Z - self._ball_start_z), 0.0, 1.0))
+        continuous_lift_term = CONTINUOUS_LIFT_COEF * lift_progress if is_touching else 0.0
+        binary_lift_term  = BINARY_LIFT_BONUS if ball_z > BINARY_LIFT_Z else 0.0
+        target_term       = TARGET_BONUS if ball_z > TARGET_Z else 0.0
+        action_delta       = action - self._prev_action
+        action_penalty_term = -ACTION_PENALTY_COEF * float(np.dot(action_delta, action_delta)) if ball_z > ACTION_PENALTY_Z else 0.0
+
+        held_at_target = is_touching and ball_z > TARGET_Z
+        self._success_hold_steps = (self._success_hold_steps + 1) if held_at_target else 0
+        success_term = SUCCESS_BONUS if self._success_hold_steps >= SUCCESS_HOLD_STEPS else 0.0
+
+        self._was_touching_lifted = lifted_now
+        self._prev_action = action.copy()
+
+        # Sustained hold tracking (used elsewhere, e.g. curriculum success rate)
         is_held = bool(is_touching and dist_to_ball <= 0.06 and grip_angle < 0.28)
         if is_held and ball_z > 0.040:
             self.held_in_air_steps += 1
         else:
             self.held_in_air_steps = 0
 
-        # Big one-time bonus: genuinely grasped + lifted + held steady, no slipping.
-        # "Genuinely carried" requires the ball's velocity to match the gripper's —
-        # a flicked/tossed ball has its own free-flight velocity, so this breaks the
-        # streak immediately even if it briefly touches both pads while airborne.
+        # ── Anti-flick stable-grasp bonus (this project's own addition on top
+        # of V11, added 2026-09-08) — ball must move WITH the gripper, not on
+        # its own separate flight path, for the hold streak to count.
         dt          = self.n_substeps * self.model.opt.timestep
         gripper_vel = (gripper_pos - self._prev_pinch_pos) / dt
         ball_vel    = self.data.qvel[self.ball_dof_adr:self.ball_dof_adr + 3]
@@ -332,34 +338,26 @@ class SO101PickEnv(gym.Env):
             stable_grasp_bonus = STABLE_GRASP_BONUS
             self._stable_bonus_given = True
 
-        # ── Potential-based shaping (used only when reward_type == "shaped") ──
-        ball_ascent = max(0.0, ball_z - self._ball_start_z)
-        hand_ascent = max(0.0, float(gripper_pos[2]) - self._gripper_start_z)
-        current_potential    = self._potential(dist_to_ball, grip_angle, is_touching,
-                                                is_held, ball_ascent, hand_ascent)
-        shaping_reward        = current_potential - self._prev_potential + stable_grasp_bonus
-        self._prev_potential  = current_potential
+        v11_reward = (reach_term + push_down_term + drop_term + grasp_term
+                      + continuous_lift_term + binary_lift_term + target_term
+                      + action_penalty_term + success_term + stable_grasp_bonus)
 
-        # ── OpenAI-compatible reward ──────────────────────────────────────────
         achieved_goal = ball_pos
         desired_goal  = self._goal
         info = {
             "dist":              dist_to_ball,
             "ball_z":            ball_z,
             "is_touching":       is_touching,
-            "shaping_reward":    shaping_reward,
+            "v11_reward":        v11_reward,
             "is_held":           is_held,
             "held_in_air_steps": self.held_in_air_steps,
             "grip_angle":        grip_angle,
         }
         reward = float(self.compute_reward(achieved_goal, desired_goal, info))
 
-        # Success: ball within distance_threshold of goal (>=10cm up) AND genuinely held
-        success    = bool(
-            np.linalg.norm(achieved_goal - desired_goal) <= self.distance_threshold
-            and is_held
-            and self.held_in_air_steps >= 3
-        )
+        # Episode success: genuinely held at/above target height for a few
+        # consecutive steps (same condition that unlocks the V11 success_term).
+        success    = bool(self._success_hold_steps >= SUCCESS_HOLD_STEPS)
         terminated = success
         truncated  = bool(self.current_step >= self.max_steps)
 
@@ -371,4 +369,3 @@ class SO101PickEnv(gym.Env):
 
     def render(self):
         pass
-

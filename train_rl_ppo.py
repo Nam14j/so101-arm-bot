@@ -37,7 +37,7 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "outputs", "rl_models", "so101_sac_her")
 
 
 def make_env():
-    return SO101PickEnv(reward_type="shaped")
+    return SO101PickEnv(reward_type="v11")
 
 
 # ── Curriculum Callback ────────────────────────────────────────────────────────
