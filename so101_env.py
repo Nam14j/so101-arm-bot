@@ -33,6 +33,17 @@ DISTANCE_THRESHOLD = 0.05
 # Target lift height: ball must reach 10cm above table to count as "picked up"
 TARGET_Z = 0.10
 
+# Added 2026-09-08: a big one-time bonus the instant it genuinely grasps the
+# ball (both pads, gripper closed, close enough) AND lifts it AND holds it
+# there continuously without dropping it, even before it necessarily reaches
+# the exact goal height/position. This is deliberately easier to reach than
+# full "success" (which also needs the precise goal position) so the agent
+# gets a big, clear signal for the core skill — grasp + lift + don't slip —
+# on its own.
+STABLE_HOLD_STEPS  = 15     # ~0.3s of unbroken, genuine hold while lifted
+STABLE_LIFT_HEIGHT = 0.06   # ball must be at least 6cm off the table (started at ~2.4cm)
+STABLE_GRASP_BONUS = 300.0
+
 class SO101PickEnv(gym.Env):
     """
     Gymnasium GoalEnv for SO-101 robot arm picking an orange foam ball.
@@ -208,6 +219,7 @@ class SO101PickEnv(gym.Env):
         super().reset(seed=seed)
         self.current_step      = 0
         self.held_in_air_steps = 0
+        self._stable_bonus_given = False   # resets each episode
 
         # Randomize ball position on desk
         bx = self.np_random.uniform(0.18, 0.23)
@@ -292,12 +304,21 @@ class SO101PickEnv(gym.Env):
         else:
             self.held_in_air_steps = 0
 
+        # Big one-time bonus: genuinely grasped + lifted + held steady, no slipping.
+        stable_grasp_bonus = 0.0
+        if (not self._stable_bonus_given
+                and is_held
+                and ball_z >= STABLE_LIFT_HEIGHT
+                and self.held_in_air_steps >= STABLE_HOLD_STEPS):
+            stable_grasp_bonus = STABLE_GRASP_BONUS
+            self._stable_bonus_given = True
+
         # ── Potential-based shaping (used only when reward_type == "shaped") ──
         ball_ascent = max(0.0, ball_z - self._ball_start_z)
         hand_ascent = max(0.0, float(gripper_pos[2]) - self._gripper_start_z)
         current_potential    = self._potential(dist_to_ball, grip_angle, is_touching,
                                                 is_held, ball_ascent, hand_ascent)
-        shaping_reward        = current_potential - self._prev_potential
+        shaping_reward        = current_potential - self._prev_potential + stable_grasp_bonus
         self._prev_potential  = current_potential
 
         # ── OpenAI-compatible reward ──────────────────────────────────────────
