@@ -1,12 +1,24 @@
 #!/usr/bin/env python3
 """
-train_rl_ppo.py — SAC + HER (Hindsight Experience Replay) for SO-101 Ball Pick
+train_rl_ppo.py — SAC for SO-101 Ball Pick (V11 staged reward)
 
-Uses the EXACT same training method as OpenAI FetchPickAndPlace:
-  • Algorithm  : SAC (off-policy, works great with sparse rewards)
-  • Replay     : HerReplayBuffer (relabels failed episodes as successes)
-  • Reward     : Sparse -1/0  (OpenAI standard, no reward hacking)
-  • Observation: GoalEnv dict {observation, achieved_goal, desired_goal}
+Updated 2026-09-08: dropped HerReplayBuffer. V11 (see so101_env.py) is a
+fixed-height staged reward, not a goal-distance reward, so HER's "relabel
+a failed episode as a success toward wherever it actually ended up"
+trick had nothing meaningful left to do — it was only useful for the old
+goal-distance-based reward this project no longer uses. Now uses SAC's
+plain default replay buffer instead. Also now starts every episode at
+the FINAL curriculum level's position (level 3 — full workspace, home
+pose) by default instead of the easier level-1 starting pose, and no
+longer auto-advances through curriculum levels — pass --lock_level to
+override.
+
+  • Algorithm  : SAC (off-policy, works great with sparse/staged rewards)
+  • Replay     : SAC's default ReplayBuffer (no goal relabeling)
+  • Reward     : V11 staged reward — see so101_env.py
+  • Observation: Dict {observation, achieved_goal, desired_goal} — kept for
+                 interface stability, though achieved/desired_goal are now
+                 unused by the reward itself
 
 Run:
   python train_rl_ppo.py
@@ -25,7 +37,6 @@ import numpy as np
 warnings.filterwarnings("ignore", category=UserWarning)
 
 from stable_baselines3 import SAC
-from stable_baselines3.her.her_replay_buffer import HerReplayBuffer
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback, BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 
@@ -237,9 +248,14 @@ def main():
     parser.add_argument("--timesteps", type=int,   default=2_000_000)
     parser.add_argument("--lr",        type=float, default=1e-3)
     parser.add_argument("--device",    type=str,   default="auto")
-    parser.add_argument("--lock_level",     type=int,   default=None,
+    parser.add_argument("--lock_level",     type=int,   default=3,
                          help="Pin curriculum to this level for the whole run (1/2/3) "
-                              "instead of auto-advancing.")
+                              "instead of auto-advancing. Defaults to 3 (final level: "
+                              "full workspace, home-pose start) as of 2026-09-08 — "
+                              "pass e.g. --lock_level 1 to go back to starting at the "
+                              "ball, or --lock_level None-equivalent isn't supported; "
+                              "use the CurriculumCallback path by editing this default "
+                              "back to None if auto-advance is wanted again.")
     parser.add_argument("--success_stop",   type=float, default=None,
                          help="Stop early once recent success rate (last 20 eps) reaches this (e.g. 0.10 = 10%%).")
     parser.add_argument("--time_limit_min", type=float, default=None,
@@ -254,7 +270,7 @@ def main():
     print(f"  Timesteps : {args.timesteps:,}")
     print(f"  Output    : {OUTPUT_DIR}")
     print(f"  Reward    : Sparse  (0 = success, -1 = fail)")
-    print(f"  HER goals : future  (relabels future positions as goals)")
+    print(f"  Replay    : SAC default ReplayBuffer (no HER)")
     print("-" * 70)
 
     env      = DummyVecEnv([make_env])
@@ -296,15 +312,10 @@ def main():
         name_prefix="so101_sac_her",
     )
 
-    # SAC + HER — MultiInputPolicy handles the GoalEnv dict obs space
+    # Plain SAC (no HER) — MultiInputPolicy still handles the Dict obs space fine
     model = SAC(
         policy="MultiInputPolicy",
         env=env,
-        replay_buffer_class=HerReplayBuffer,
-        replay_buffer_kwargs=dict(
-            n_sampled_goal=4,
-            goal_selection_strategy="future",
-        ),
         verbose=1,
         learning_rate=args.lr,
         buffer_size=1_000_000,
